@@ -1,0 +1,46 @@
+{
+  "name": "sebastianlevano-cms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone Payload CMS for sebastianlevano.com",
+  "type": "module",
+  "packageManager": "bun@1.1.18",
+  "engines": {
+    "node": ">=24.22.1 <25",
+    "bun": "1.1.x"
+  },
+  "scripts": {
+    "dev": "cross-env NODE_OPTIONS=--no-deprecation next dev",
+    "build": "cross-env NODE_OPTIONS=--no-deprecation payload build",
+    "start": "cross-env NODE_OPTIONS=--no-deprecation next start",
+    "lint": "cross-env NODE_OPTIONS=--no-deprecation eslint .",
+    "typecheck": "tsc --noEmit",
+    "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
+    "generate:types": "bun run payload generate:types",
+    "generate:importmap": "bun run payload generate:importmap",
+    "migrate": "bun run payload migrate",
+    "migrate:create": "bun run payload migrate:create",
+    "migrate:status": "bun run payload migrate:status",
+    "migrate:down": "bun run payload migrate:down",
+    "build:with-migrations": "bun run migrate && bun run build"
+  },
+  "dependencies": {
+    "@payloadcms/db-postgres": "3.89.0",
+    "@payloadcms/next": "3.89.0",
+    "@payloadcms/ui": "3.89.0",
+    "cross-env": "7.0.3",
+    "graphql": "16.10.0",
+    "next": "16.3.4",
+    "payload": "3.89.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.16.0",
+    "eslint-config-next": "16.3.4",
+    "typescript": "5.7.3"
+  }
+}
