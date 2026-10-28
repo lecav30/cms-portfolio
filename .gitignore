@@ -13,3 +13,7 @@ out/
 .DS_Store
 coverage/
 *.tsbuildinfo
+
+# Next.js development-only agent instruction files
+AGENTS.md
+CLAUDE.md

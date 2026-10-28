@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildConfig } from 'payload'
 
-import { Users } from './collections/Users'
+import { Users, usersSlug } from './collections/Users'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -30,7 +30,7 @@ const allowedOrigins = parseOrigins(process.env.CORS_ORIGINS)
 
 export default buildConfig({
   admin: {
-    user: Users.slug,
+    user: usersSlug,
     importMap: {
       baseDir: path.resolve(dirname),
     },
@@ -55,13 +55,13 @@ export default buildConfig({
     }
 
     const { totalDocs } = await payload.count({
-      collection: Users.slug,
+      collection: usersSlug,
       overrideAccess: true,
     })
 
     if (totalDocs === 0) {
       await payload.create({
-        collection: Users.slug,
+        collection: usersSlug,
         data: { email, password },
         overrideAccess: true,
       })
