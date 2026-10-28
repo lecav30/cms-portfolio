@@ -1,7 +1,10 @@
-import { defineConfig, globalIgnores } from 'eslint/config'
 import nextVitals from 'eslint-config-next/core-web-vitals'
 
-export default defineConfig([
+const config = [
   ...nextVitals,
-  globalIgnores(['.next/**', 'node_modules/**', 'src/payload-types.ts']),
-])
+  {
+    ignores: ['.next/', 'node_modules/', 'src/payload-types.ts', 'src/payload-generated-schema.ts'],
+  },
+]
+
+export default config
