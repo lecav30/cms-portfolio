@@ -5,6 +5,12 @@ import { slugField } from '../fields/slug'
 import { categoriesSlug } from './Categories'
 import { mediaSlug } from './Media'
 import { tagsSlug } from './Tags'
+import {
+  capturePublicPostBeforeChange,
+  capturePublicPostBeforeDelete,
+  queuePublicPostChange,
+  queuePublicPostDelete,
+} from '../revalidation/posts'
 
 export const postsSlug = 'posts'
 
@@ -69,7 +75,10 @@ export const Posts: CollectionConfig = {
     delete: isAuthenticated,
   },
   hooks: {
-    beforeChange: [preservePublishedAt],
+    afterChange: [queuePublicPostChange],
+    afterDelete: [queuePublicPostDelete],
+    beforeChange: [capturePublicPostBeforeChange, preservePublishedAt],
+    beforeDelete: [capturePublicPostBeforeDelete],
   },
   fields: [
     {

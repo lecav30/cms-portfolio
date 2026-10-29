@@ -9,6 +9,7 @@ import { Categories } from './collections/Categories'
 import { Media } from './collections/Media'
 import { Posts } from './collections/Posts'
 import { Tags } from './collections/Tags'
+import { blogRevalidationTask } from './revalidation/task'
 import { r2StoragePlugin } from './storage/r2'
 
 const filename = fileURLToPath(import.meta.url)
@@ -57,6 +58,12 @@ export default buildConfig({
     // REST is the defined portfolio integration contract. Disable an unused API
     // surface instead of maintaining a second public query contract in Phase 2.
     disable: true,
+  },
+  jobs: {
+    // The CMS queues public-content invalidations transactionally. `after()`
+    // starts a run only after a web response, while serverless deployments need
+    // an authenticated external runner for deferred retries.
+    tasks: [blogRevalidationTask],
   },
   onInit: async (payload) => {
     const email = process.env.INITIAL_ADMIN_EMAIL

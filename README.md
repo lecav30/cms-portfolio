@@ -151,6 +151,50 @@ Run the static storage-selection checks with:
 bun run validate:r2-config
 ```
 
+## Signed portfolio cache revalidation
+
+Published Post changes are queued as Payload jobs and delivered only after the
+CMS web response has completed. The sender never includes editorial bodies,
+users, media credentials, or other private data. It sends only the portfolio's
+version-1 publication event: an event UUID, operation, post ID, and current or
+previous public slug/category locations.
+
+Set these server-only values together when integrating with the portfolio:
+
+- `PORTFOLIO_REVALIDATION_URL` — the exact portfolio endpoint, ending in
+  `/api/internal/revalidate`. HTTPS is mandatory outside loopback development.
+- `BLOG_REVALIDATION_SECRET` — the same high-entropy secret configured in the
+  portfolio receiver. It must be at least 32 bytes and never use a
+  `NEXT_PUBLIC_` prefix.
+
+For every event, the CMS serializes JSON once and signs the exact bytes with
+HMAC-SHA256 over `<unix-seconds>.<raw-json-bytes>`. It sends
+`X-Blog-Revalidation-Timestamp` and
+`X-Blog-Revalidation-Signature: sha256=<lowercase-hex>`. The full receiver
+contract is maintained in the portfolio repository at
+`docs/validation/phase-05a-portfolio-revalidation.md`.
+
+Draft-only saves do not enqueue an event: the hooks compare the persisted
+published document before and after the change. Publish, published edits,
+slug/category moves, unpublish, and deletion do enqueue an event. Previous
+locations are included where needed to invalidate old URLs.
+
+The Payload jobs record is written in the same database transaction as the
+editorial operation. In Next request handling, `after()` starts the queue only
+after the response completes, so a rolled-back write has no persisted job to
+deliver. The job task treats HTTP 204 as success; HTTP 408, 429, 5xx, network,
+and timeout failures retry twice with exponential one-second backoff. Other 4xx
+responses are logged as non-retryable configuration/contract failures.
+
+Vercel must not rely on an in-process cron. The immediate `after()` run covers
+normal web edits, while production needs an authenticated external runner for
+deferred retries. Use `bun run revalidate:jobs` from an authorized worker or
+equivalent secure scheduler to process the `blog-revalidation` queue. Payload
+records a failed job after its bounded attempts; after fixing a configuration
+or receiver problem, run `bun run revalidate:replay` to reset and retry only
+failed revalidation jobs. The portfolio retains its five-minute fetch fallback,
+so this is at-least-once invalidation rather than guaranteed delivery.
+
 ## Database and migration workflow
 
 The project uses the official `@payloadcms/db-postgres` adapter with
