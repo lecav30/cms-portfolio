@@ -93,6 +93,7 @@ request.
 | CMS `bun run lint` | PASS |
 | CMS `bun run validate:revalidation` | PASS |
 | CMS `bun run build` | PASS |
+| CMS `bun run validate:editorial` initial attempt | BLOCKED: its required loopback CMS on port 3011 was not yet running; no application defect was indicated. |
 | CMS `bun run validate:editorial` against a temporary local CMS on port 3011 | PASS |
 | CMS `bun run validate:r2-config` | PASS (static configuration check) |
 | Portfolio `bun install --frozen-lockfile` | PASS |
@@ -119,7 +120,6 @@ request.
 
 ## Git
 
-The only tracked Phase 5C change is this report in the CMS repository. It was
-committed locally as `4e011b5 test(cms): validate end-to-end blog publication
-revalidation`. The portfolio repository was not modified or committed. No push
-was performed.
+The initial Phase 5C report was committed locally as
+`0328cec test(cms): validate end-to-end blog publication revalidation`.
+The portfolio repository was not modified or committed. No push was performed.
