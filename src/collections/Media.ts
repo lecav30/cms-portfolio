@@ -10,8 +10,9 @@ const dirname = path.dirname(filename)
 export const mediaSlug = 'media'
 
 /**
- * Local filesystem storage is deliberately temporary. Phase 3 replaces this
- * static directory with the Cloudflare R2 adapter before production use.
+ * This path is used only when R2 is explicitly disabled in development. The
+ * Phase 3 storage plugin disables local storage whenever R2 is enabled and
+ * Payload refuses production startup without a complete R2 configuration.
  */
 export const Media: CollectionConfig = {
   slug: mediaSlug,

@@ -9,6 +9,7 @@ import { Categories } from './collections/Categories'
 import { Media } from './collections/Media'
 import { Posts } from './collections/Posts'
 import { Tags } from './collections/Tags'
+import { r2StoragePlugin } from './storage/r2'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -79,6 +80,7 @@ export default buildConfig({
       payload.logger.info('Initial CMS administrator created. Remove INITIAL_ADMIN_* variables now.')
     }
   },
+  plugins: [r2StoragePlugin()],
   routes: {
     admin: '/admin',
   },
