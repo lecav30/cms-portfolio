@@ -1,6 +1,6 @@
 import type { CollectionConfig } from 'payload'
 
-const isAuthenticated = ({ req: { user } }: { req: { user?: unknown } }): boolean => Boolean(user)
+import { isAuthenticated } from '../access/editorial'
 
 export const usersSlug = 'users'
 

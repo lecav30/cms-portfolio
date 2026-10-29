@@ -1,9 +1,9 @@
 # Sebastian Levano CMS
 
-Standalone Payload CMS foundation for `cms.sebastianlevano.com`. This is a separate
-repository and Vercel project from the public portfolio. Phase 1 intentionally
-contains only the authenticated `Users` collection; editorial collections, R2
-storage, and public blog pages are later phases.
+Standalone Payload CMS for `cms.sebastianlevano.com`. This is a separate
+repository and Vercel project from the public portfolio. Phase 2 adds the
+editorial model and published-only REST reads; R2 storage and public blog pages
+remain later phases.
 
 ## Stack and prerequisites
 
@@ -46,6 +46,61 @@ Payload's same-origin CSRF protection. `robots.ts` disallows `/admin/` and
 `/api/`; this is not authentication and the collection access controls remain
 the protection boundary.
 
+## Editorial model and REST API
+
+Payload uses native drafts and versions for `Posts`; `_status` is Payload's
+internal `draft` / `published` field, not a custom status field. Creating or
+updating a post as a draft saves its editable version. Publish by setting
+`_status` to `published`; unpublish by setting it back to `draft`. The first
+publish sets `publishedAt`, and later edits or re-publication preserve it.
+
+| Collection | Public REST reads | Authenticated REST writes | Notes |
+| --- | --- | --- | --- |
+| `posts` | Only `_status=published` documents | Create, update, publish, unpublish, delete | Versions and draft reads require authentication. |
+| `categories` | Yes | Create, update, delete | Public fields are name, slug, description, and timestamps. |
+| `tags` | Yes | Create, update, delete | Public fields are name, slug, and timestamps. |
+| `media` | Yes | Upload, update, delete | Only image metadata and the upload URL are modelled; do not upload embargoed assets. |
+| `users` | No | Authenticated-only | No public registration or listing. |
+
+Examples of the future portfolio read contract:
+
+```text
+GET /api/posts?where[slug][equals]=mi-articulo&depth=2
+GET /api/posts/:id
+GET /api/categories
+GET /api/tags
+GET /api/media/:id
+```
+
+Anonymous Posts access is constrained in Payload access control before caller
+filters are applied. Therefore direct IDs, `draft=true`, depth/population, and
+`where[_status]=draft` do not bypass the published-only rule. GraphQL is
+disabled because REST is the intended integration contract for this project.
+
+`title` / `name` values are normalized to lower-case, accent-free URL slugs.
+Slugs have database-backed uniqueness; collisions are rejected rather than
+receiving random suffixes. A deliberate slug change changes the future public
+URL, so Phase 4 must supply redirects for old portfolio URLs.
+
+### Media limitation until Phase 3
+
+`Media` accepts JPEG, PNG, WebP, AVIF, and GIF only. Payload's upload handler
+has a 5 MiB request limit and remote URL pasting is disabled. Files currently
+write to the ignored local `media/` directory solely for development. This is
+not Vercel-safe persistent storage and must be replaced with the Cloudflare R2
+adapter before production media is used.
+
+To run the local editorial integration validation after a local administrator
+exists, start the CMS on an unused loopback port and run:
+
+```bash
+CMS_TEST_ORIGIN=http://127.0.0.1:3011 bun run validate:editorial
+```
+
+It creates temporary editorial fixtures using the existing admin's local access
+context, tests public REST behavior, then removes the fixtures in a `finally`
+cleanup block. It does not print credentials or retain content.
+
 ## Database and migration workflow
 
 The project uses the official `@payloadcms/db-postgres` adapter with
@@ -57,10 +112,21 @@ After completing a reviewed schema change in development:
 
 1. Generate and review a versioned migration: `bun run migrate:create`.
 2. Commit the generated `src/migrations/` files with the config change.
-3. Check a target database without changing it: `bun run migrate:status`.
-4. In a deployment environment that can reach the intended database, run
+3. Review the generated `up` and `down` SQL. In particular, down migrations
+   can be destructive and are never an automatic rollback plan.
+4. Check a target database without changing it: `bun run migrate:status`.
+5. In a deployment environment that can reach the intended database, run
    `bun run migrate` before the build. `bun run build:with-migrations` is an
    explicit convenience command, not the default `build` command.
+
+The committed `phase_02_editorial_collections` migration is a **baseline**
+generated after Phase 1 development schema push. It creates the Phase 1 and
+Phase 2 Payload tables for a new empty database. Do not run it against an
+existing push-managed local database: local development continues to use
+Payload's development-only schema synchronization. Before first production
+deployment, apply the reviewed baseline once to a fresh Neon database, record
+it in `payload_migrations`, and use only subsequent reviewed migrations. Never
+combine an unreviewed schema push with production migration application.
 
 Do not use `migrate:fresh`, `migrate:reset`, or `migrate:refresh` against any
 shared or production database. Review generated SQL and take a backup before

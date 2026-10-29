@@ -18,6 +18,7 @@
     "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
     "generate:types": "bun run payload generate:types",
     "generate:importmap": "bun run payload generate:importmap",
+    "validate:editorial": "bun scripts/validate-editorial-model.ts",
     "migrate": "bun run payload migrate",
     "migrate:create": "bun run payload migrate:create",
     "migrate:status": "bun run payload migrate:status",
@@ -27,6 +28,7 @@
   "dependencies": {
     "@payloadcms/db-postgres": "3.89.0",
     "@payloadcms/next": "3.89.0",
+    "@payloadcms/richtext-lexical": "3.89.0",
     "@payloadcms/ui": "3.89.0",
     "cross-env": "7.0.3",
     "graphql": "16.10.0",
