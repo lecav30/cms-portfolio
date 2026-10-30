@@ -268,6 +268,13 @@ variables in the CMS project only:
 Bootstrap variables belong only in the controlled one-time initial deployment
 and should then be removed and followed by a deployment without them.
 
+Production, Preview, and Development are separate Vercel environment scopes.
+This CMS refuses local media storage whenever `NODE_ENV=production`, which also
+applies to Vercel Preview builds. If CMS Preview deployments must start, give
+them their own non-production Postgres database and R2 bucket/credentials; do
+not point Preview at production content, media, or a production portfolio
+revalidation receiver. Development remains the ignored local environment.
+
 Use `bun run build` as the normal Vercel build command. **Do not** set
 `bun run build:with-migrations` as a project-wide build command: Vercel builds
 can be previews or concurrent deployments, neither of which is a safe owner of
@@ -278,12 +285,15 @@ already-migrated revision after that step succeeds. Roll back application code
 independently; do not run a destructive migration `down` as an automatic
 rollback.
 
-The current CMS has no configured production job runner. The immediate
-post-response attempt is best-effort only. Before production, add and test an
-authenticated, bounded runner for the Payload `blog-revalidation` queue (for
-example, a protected endpoint invoked by Vercel Cron) plus monitoring and the
-scoped replay procedure. Do not expose the Payload job endpoint or rely on a
-long-running in-process worker in Vercel Functions.
+The configured Vercel Cron job calls the authenticated, bounded
+`GET /api/internal/revalidation-jobs/run` endpoint at `17 3 * * *` UTC.
+It requires a dedicated `CRON_SECRET`, processes only the
+`blog-revalidation` queue/task, and uses a PostgreSQL advisory lock. The
+immediate post-response attempt remains best-effort; monitor both Cron and
+Payload job failures, then use the scoped `bun run revalidate:replay` procedure
+after diagnosing a configuration or receiver fault. Do not expose the generic
+Payload jobs endpoint or rely on a long-running in-process worker in Vercel
+Functions.
 
 No Vercel, Neon, DNS, R2 bucket, R2 credentials, public media hostname, or
 public portfolio blog integration has been provisioned by this repository.
