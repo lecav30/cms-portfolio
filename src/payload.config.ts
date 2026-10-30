@@ -26,11 +26,36 @@ const requiredEnv = (name: 'DATABASE_URL' | 'PAYLOAD_SECRET'): string => {
   return value
 }
 
+const isLoopbackHost = (hostname: string): boolean =>
+  hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+
 const parseOrigins = (value: string | undefined): string[] =>
   value
     ?.split(',')
     .map((origin) => origin.trim())
-    .filter(Boolean) ?? []
+    .filter(Boolean)
+    .map((origin) => {
+      let url: URL
+
+      try {
+        url = new URL(origin)
+      } catch {
+        throw new Error('CORS_ORIGINS must contain only absolute HTTP(S) origins.')
+      }
+
+      if (
+        (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHost(url.hostname))) ||
+        url.pathname !== '/' ||
+        url.search ||
+        url.hash ||
+        url.username ||
+        url.password
+      ) {
+        throw new Error('CORS_ORIGINS must contain only exact HTTPS origins (or loopback HTTP origins in development).')
+      }
+
+      return url.origin
+    }) ?? []
 
 const databaseURL = requiredEnv('DATABASE_URL')
 const secret = requiredEnv('PAYLOAD_SECRET')

@@ -235,9 +235,12 @@ running production migrations.
 
 ## Vercel handoff (later)
 
-Create a separate Vercel project for this repository and select Node `24.x`.
-Vercel detects `bun.lock` / `bun.lockb` and installs with Bun, while the deployed
-Next/Payload functions still run on Node. Configure these encrypted environment
+Create a separate Vercel project for this repository and explicitly select Node
+`24.x`; do not inherit Vercel's changing default major runtime. Vercel detects
+the committed `bun.lockb` and installs with Bun, while the deployed
+Next/Payload functions still run on Node. Confirm the deployed Node 24 patch
+still satisfies `engines.node` and record the detected Bun version from build
+logs before promoting a deployment. Configure these encrypted environment
 variables in the CMS project only:
 
 - `DATABASE_URL` — the dedicated Neon production connection string, TLS enabled.
@@ -247,9 +250,24 @@ variables in the CMS project only:
   intentionally introduced.
 
 Bootstrap variables belong only in the controlled one-time initial deployment
-and should then be removed. Configure the platform build command to explicitly
-run reviewed migrations before `bun run build` only after verifying database
-network access and the migration workflow in a non-production environment.
+and should then be removed and followed by a deployment without them.
+
+Use `bun run build` as the normal Vercel build command. **Do not** set
+`bun run build:with-migrations` as a project-wide build command: Vercel builds
+can be previews or concurrent deployments, neither of which is a safe owner of
+schema changes. Instead, run `bun run migrate:status` and then `bun run
+migrate` once from a single, access-controlled release/CI step using the exact
+production environment and a direct Neon migration connection. Only deploy the
+already-migrated revision after that step succeeds. Roll back application code
+independently; do not run a destructive migration `down` as an automatic
+rollback.
+
+The current CMS has no configured production job runner. The immediate
+post-response attempt is best-effort only. Before production, add and test an
+authenticated, bounded runner for the Payload `blog-revalidation` queue (for
+example, a protected endpoint invoked by Vercel Cron) plus monitoring and the
+scoped replay procedure. Do not expose the Payload job endpoint or rely on a
+long-running in-process worker in Vercel Functions.
 
 No Vercel, Neon, DNS, R2 bucket, R2 credentials, public media hostname, or
 public portfolio blog integration has been provisioned by this repository.
