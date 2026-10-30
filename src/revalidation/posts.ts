@@ -10,6 +10,7 @@ import {
   type PublicPostState,
 } from './contract'
 import { isProductionRuntime, resolveBlogRevalidationConfiguration } from './config'
+import { runQueuedRevalidationJobs } from './runner'
 
 type PostLike = {
   _status?: 'draft' | 'published' | null
@@ -82,12 +83,7 @@ const scheduleQueuedJobs = (payload: Payload): void => {
   try {
     after(async () => {
       try {
-        await payload.jobs.run({
-          limit: 10,
-          queue: blogRevalidationQueue,
-          sequential: true,
-          silent: { error: false, info: true },
-        })
+        await runQueuedRevalidationJobs(payload)
       } catch {
         payload.logger.error({ msg: 'Unable to start queued portfolio revalidation jobs after the CMS response.' })
       }

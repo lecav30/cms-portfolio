@@ -187,12 +187,25 @@ and timeout failures retry twice with exponential one-second backoff. Other 4xx
 responses are logged as non-retryable configuration/contract failures.
 
 Vercel must not rely on an in-process cron. The immediate `after()` run covers
-normal web edits, while production needs an authenticated external runner for
-deferred retries. Use `bun run revalidate:jobs` from an authorized worker or
-equivalent secure scheduler to process the `blog-revalidation` queue. Payload
-records a failed job after its bounded attempts; after fixing a configuration
-or receiver problem, run `bun run revalidate:replay` to reset and retry only
-failed revalidation jobs. The portfolio retains its five-minute fetch fallback,
+normal web edits, while the CMS also exposes the authenticated, GET-only
+`/api/internal/revalidation-jobs/run` runner for deferred retries. `vercel.json`
+calls it once daily at `03:17 UTC`; this conservative schedule is a recovery
+backstop, not a claim of immediate cache freshness. Vercel sends
+`Authorization: Bearer <CRON_SECRET>` for configured cron requests. Set a
+dedicated `CRON_SECRET` of at least 32 random bytes; it must not reuse
+`BLOG_REVALIDATION_SECRET` or `PAYLOAD_SECRET`.
+
+The runner processes at most ten jobs serially from the dedicated
+`blog-revalidation` queue and task slug, uses a PostgreSQL advisory lock to
+avoid overlap with the request hook or local scripts, and never runs arbitrary
+Payload queues. It returns `401` for invalid authentication, `503` when cron
+configuration is missing or weak, `202` when another runner holds the lock, and
+`200` for a bounded completed run. It emits no job payloads in its HTTP body and
+is marked no-store/noindex. Payload records a failed job after its bounded
+attempts; after fixing a configuration or receiver problem, run `bun run
+revalidate:replay` deliberately to reset and retry only failed revalidation
+jobs. `bun run revalidate:jobs` runs the same bounded, locked code path from a
+trusted local/CI process. The portfolio retains its five-minute fetch fallback,
 so this is at-least-once invalidation rather than guaranteed delivery.
 
 ## Database and migration workflow
@@ -248,6 +261,9 @@ variables in the CMS project only:
 - `NEXT_PUBLIC_SERVER_URL=https://cms.sebastianlevano.com`.
 - `CORS_ORIGINS=https://www.sebastianlevano.com` when a browser integration is
   intentionally introduced.
+- `PORTFOLIO_REVALIDATION_URL` and `BLOG_REVALIDATION_SECRET` — the exact
+  HTTPS portfolio receiver and its shared signing secret.
+- `CRON_SECRET` — a separate high-entropy secret used only by Vercel Cron.
 
 Bootstrap variables belong only in the controlled one-time initial deployment
 and should then be removed and followed by a deployment without them.
