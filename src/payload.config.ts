@@ -1,5 +1,5 @@
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { lexicalEditor } from '@payloadcms/richtext-lexical'
+import { BlocksFeature, EXPERIMENTAL_TableFeature, lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildConfig } from 'payload'
@@ -11,6 +11,7 @@ import { Posts } from './collections/Posts'
 import { Tags } from './collections/Tags'
 import { blogRevalidationTask } from './revalidation/task'
 import { r2StoragePlugin } from './storage/r2'
+import { DisplayMathBlock, InlineMathBlock, TechnicalCodeBlock } from './blocks/TechnicalContent'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -53,7 +54,19 @@ export default buildConfig({
     },
     migrationDir: path.resolve(dirname, 'migrations'),
   }),
-  editor: lexicalEditor({}),
+  editor: lexicalEditor({
+    features: ({ defaultFeatures }) => [
+      ...defaultFeatures,
+      BlocksFeature({
+        blocks: [TechnicalCodeBlock, DisplayMathBlock],
+        inlineBlocks: [InlineMathBlock],
+      }),
+      // Payload exposes this as experimental in 3.89.0. Keep the serialized
+      // Lexical table nodes as-is so the public renderer can support them in
+      // Phase 7B without a CMS-side schema migration.
+      EXPERIMENTAL_TableFeature(),
+    ],
+  }),
   graphQL: {
     // REST is the defined portfolio integration contract. Disable an unused API
     // surface instead of maintaining a second public query contract in Phase 2.

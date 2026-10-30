@@ -19,6 +19,7 @@
     "generate:types": "bun run payload generate:types",
     "generate:importmap": "bun run payload generate:importmap",
     "validate:editorial": "bun scripts/validate-editorial-model.ts",
+    "validate:technical-content": "bun scripts/validate-technical-content.ts",
     "validate:r2-config": "bun scripts/validate-r2-config.ts",
     "validate:r2-live": "bun scripts/validate-r2-live.ts",
     "validate:revalidation": "bun scripts/validate-revalidation-sender.ts",

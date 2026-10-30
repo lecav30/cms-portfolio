@@ -1,6 +1,7 @@
-import type { CollectionBeforeChangeHook, CollectionConfig } from 'payload'
+import { ValidationError, type CollectionBeforeChangeHook, type CollectionBeforeValidateHook, type CollectionConfig } from 'payload'
 
 import { isAuthenticated, publishedOrAuthenticated } from '../access/editorial'
+import { isTechnicalCodeLanguage } from '../blocks/TechnicalContent'
 import { slugField } from '../fields/slug'
 import { categoriesSlug } from './Categories'
 import { mediaSlug } from './Media'
@@ -13,6 +14,53 @@ import {
 } from '../revalidation/posts'
 
 export const postsSlug = 'posts'
+
+type TechnicalNode = {
+  children?: unknown
+  fields?: unknown
+  type?: unknown
+}
+
+const technicalNodeErrors = (value: unknown, path: string, errors: Array<{ message: string; path: string }>): void => {
+  if (!value || typeof value !== 'object') return
+
+  const node = value as TechnicalNode
+  const fields = node.fields && typeof node.fields === 'object' ? (node.fields as Record<string, unknown>) : undefined
+
+  if (node.type === 'block' && fields?.blockType === 'Code') {
+    if (!isTechnicalCodeLanguage(fields.language)) {
+      errors.push({ message: 'El lenguaje de código no está permitido.', path: `${path}.fields.language` })
+    }
+    if (typeof fields.code !== 'string' || fields.code.length > 50_000) {
+      errors.push({ message: 'El código debe ser texto plano de hasta 50.000 caracteres.', path: `${path}.fields.code` })
+    }
+  }
+
+  if ((node.type === 'block' && fields?.blockType === 'Math') || (node.type === 'inlineBlock' && fields?.blockType === 'InlineMath')) {
+    if (typeof fields.latex !== 'string' || fields.latex.length > 10_000) {
+      errors.push({ message: 'La expresión LaTeX debe ser texto de hasta 10.000 caracteres.', path: `${path}.fields.latex` })
+    }
+  }
+
+  if (Array.isArray(node.children)) {
+    node.children.forEach((child, index) => technicalNodeErrors(child, `${path}.children.${index}`, errors))
+  }
+}
+
+const validateTechnicalContent: CollectionBeforeValidateHook = ({ data, req }) => {
+  const content = (data as { content?: unknown }).content
+  if (!content || typeof content !== 'object') return data
+
+  const root = (content as { root?: unknown }).root
+  const errors: Array<{ message: string; path: string }> = []
+  technicalNodeErrors(root, 'content.root', errors)
+
+  if (errors.length > 0) {
+    throw new ValidationError({ collection: postsSlug, errors, req })
+  }
+
+  return data
+}
 
 const preservePublishedAt: CollectionBeforeChangeHook = ({ data, originalDoc }) => {
   const existingPublishedAt = (originalDoc as { publishedAt?: string } | undefined)?.publishedAt
@@ -79,6 +127,7 @@ export const Posts: CollectionConfig = {
     afterDelete: [queuePublicPostDelete],
     beforeChange: [capturePublicPostBeforeChange, preservePublishedAt],
     beforeDelete: [capturePublicPostBeforeDelete],
+    beforeValidate: [validateTechnicalContent],
   },
   fields: [
     {
