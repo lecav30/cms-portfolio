@@ -7,9 +7,11 @@ Scope: read-only production preflight. No production migration, deployment, admi
 
 ## Decision
 
-**NO-GO for migration or deployment until the separate approval gates below are satisfied.**
+**Gate A — READY FOR EXPLICIT MIGRATION AUTHORIZATION.** This is not authorization to migrate: no production write has been made.
 
-The target database is fresh and the public CMS hostname is reachable, so the infrastructure is materially closer to release. However, the production Vercel configuration and environment scopes could not be inspected through the unavailable Vercel CLI, the local production-shaped configuration has a sender-variable mismatch, and neither real R2 object delivery nor a valid signed CMS-to-portfolio notification has been tested. Most importantly, this preflight is not authorization to write to Neon or deploy.
+The resumed read-only preflight verified the linked Vercel Production project, its current deployment, the required CMS variable names and Production-only scopes, and the fresh direct-TLS Neon target. The operator's correction is reflected in Vercel: `PORTFOLIO_REVALIDATION_URL` is present and `BLOG_REVALIDATION_URL` is absent from the Production list.
+
+Gate B (configuration activation/any subsequent CMS deployment) remains a separate approval. The current Ready deployment is the reviewed `6d5765d` release, but environment edits made after that deployment must not be presumed active in its already-built runtime. Production R2 object delivery, matching webhook-secret delivery, cron invocation, and administrator bootstrap remain separate live checks after their respective approvals.
 
 ## Evidence collected
 
@@ -17,13 +19,14 @@ The target database is fresh and the public CMS hostname is reachable, so the in
 | --- | --- | --- |
 | Git release source | PASS | `main` and `origin/main` both point at `6d5765d`. Remote is `lecav30/cms-portfolio`. |
 | Required local runtime | PASS | `nvm use 24.22.1` selected Node `v24.22.1`; Bun was `1.1.18`. The initially selected shell Node was `v24.14.1`, below the package engine, so all validation commands used Node `v24.22.1`. |
-| CMS public hostname | PASS, limited | DNS resolved through Vercel and HTTPS `GET /` returned `200`. This demonstrates a reachable deployment, not its release SHA, project settings, healthy production configuration, or authenticated admin access. |
+| CMS public hostname and deployment | PASS, limited | HTTPS `GET /` returned `200`. Vercel reports a Ready Production deployment of `lecav30/cms-portfolio` ref `main` at `6d5765d5837283753def1c878cde58e9e249f7de`, with `cms.sebastianlevano.com` listed as an alias. This does not prove the later environment edit is active in that existing deployment. |
 | CMS public security smoke test | PASS, limited | `GET /admin` returned `200` (page reachability only); anonymous `GET /api/users` returned `403`; anonymous `GET /api/internal/revalidation-jobs/run` returned `401`; `/robots.txt` returned `200` and disallows `/admin/` and `/api/`. No authenticated API action was attempted. |
 | Neon identity / freshness | PASS | A one-time `SELECT`-only direct-TLS query reached a non-local target: database `neondb`, role `neondb_owner`, PostgreSQL `18.6`. It is not `cms_portfolio_dev`, has no public tables, no `payload_migrations` table, and no recorded migrations. No schema/data write occurred. |
 | R2 public hostname | BLOCKED | `media.sebastianlevano.com` resolved through Cloudflare and HTTPS worked, but a root request returned `404`. That is not proof of bucket-object delivery or custom-domain mapping. No production object was written. |
 | Portfolio receiver | PASS, limited | Previously observed public `GET /blog` returned `200`; an unsigned `POST /api/internal/revalidate` returned `401`. This confirms receiver reachability and unsigned denial only, not shared-secret equality or valid delivery. |
-| Vercel project configuration | BLOCKED | The repository has an ignored local Vercel link, but the Vercel CLI was unavailable. The operator-reported project/team/framework/Node 24.x/root/`iad1`/Git integration/production branch/domain association/Production variable scopes could not be independently inspected. |
-| Vercel Cron deployment | BLOCKED | Repository `vercel.json` declares `GET /api/internal/revalidation-jobs/run` at `17 3 * * *` (UTC); anonymous denial is live. Whether the schedule is accepted and invoked by the actual Vercel plan is unverified. |
+| Vercel project configuration | PASS | Authenticated CLI inspection confirms project `cms-portfolio` under `own-projects`, Next.js, Node `24.x`, effective root `.`, region `iad1`, and a Ready Production deployment sourced from GitHub `lecav30/cms-portfolio` `main` at the reviewed SHA. |
+| Vercel environment scopes | PASS | All source-required CMS runtime names are present in Production; Vercel reports no variables in Preview or Development. Values were not read. |
+| Vercel Cron deployment | PARTIAL | Repository `vercel.json` declares `GET /api/internal/revalidation-jobs/run` at `17 3 * * *` (UTC), and anonymous denial is live. The deployed scheduler's first invocation/plan behavior remains unobserved. |
 
 ## Configuration contract and scope check
 
@@ -31,16 +34,16 @@ The following names are derived from `.env.example` and the CMS source. Values w
 
 | Variable(s) | Owner | Expected scope | Preflight status |
 | --- | --- | --- | --- |
-| `DATABASE_URL` | CMS | Production only; direct Neon TLS endpoint, never `-pooler` | A local production-shaped configuration has a direct `sslmode=require` URL and the read-only query above succeeded. Vercel Production presence/scope is unverified. |
-| `PAYLOAD_SECRET` | CMS | Production only | Local presence checked only; Vercel scope unverified. |
-| `NEXT_PUBLIC_SERVER_URL`, `CORS_ORIGINS` | CMS | Production | Local origin/allowlist checks passed without a wildcard; Vercel scope unverified. |
-| `R2_ENABLED`, `R2_BUCKET`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL` | CMS | Production only | Local names are present and R2 is enabled; Vercel scope and production object delivery are unverified. |
-| `PORTFOLIO_REVALIDATION_URL`, `BLOG_REVALIDATION_SECRET` | CMS | Production only | Source requires this exact URL variable to end in `/api/internal/revalidate`. The local production-shaped file lacks `PORTFOLIO_REVALIDATION_URL` and instead contains unsupported `BLOG_REVALIDATION_URL`; it would not configure the sender if copied to Vercel. Correct the Vercel Production name and remove the misleading unsupported name through the operator-controlled Vercel configuration before release. Secret equality with the portfolio remains unverified. |
-| `CRON_SECRET` | CMS | Production only | Local name is present. It must be independent from the Payload and webhook secrets, at least 32 random bytes, and configured for Vercel Cron's Bearer header. Vercel scope/value is unverified. |
+| `DATABASE_URL` | CMS | Production only; direct Neon TLS endpoint, never `-pooler` | Present in Vercel Production. The read-only query reached the direct non-local target; value/scope semantics beyond Vercel's Production label were not displayed. |
+| `PAYLOAD_SECRET` | CMS | Production only | Present in Vercel Production; value was not read. |
+| `NEXT_PUBLIC_SERVER_URL`, `CORS_ORIGINS` | CMS | Production | Both present in Vercel Production; values were not read. Local origin/allowlist checks found no wildcard. |
+| `R2_ENABLED`, `R2_BUCKET`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL` | CMS | Production only | All six are present in Vercel Production. Production object delivery remains unverified. |
+| `PORTFOLIO_REVALIDATION_URL`, `BLOG_REVALIDATION_SECRET` | CMS | Production only | Both are present in Vercel Production. `BLOG_REVALIDATION_URL` is absent from the Production list. Source requires the destination to end in `/api/internal/revalidate`; values and equality with the portfolio secret were intentionally not read. |
+| `CRON_SECRET` | CMS | Production only | Present in Vercel Production. It must remain independent from the Payload and webhook secrets and meet the source's 32-byte minimum; value was not read. |
 | `PAYLOAD_CMS_URL`, `BLOG_REVALIDATION_SECRET` | Portfolio | Portfolio Production only | Expected from the read-only portfolio contract. Their Vercel Production presence/scope and the shared-secret match could not be inspected. |
 | `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | CMS | Not configured for routine production runtime | Absent from the local production-shaped file. First-admin bootstrap is deliberately a separately approved release action. |
 
-The local configuration result is evidence about the checked local ignored file only. It does not establish Vercel values or scopes. In particular, Preview must not receive production Neon, production R2 write, webhook, or cron credentials.
+The local ignored configuration remains evidence about that file only. Vercel now confirms names/scopes, not values or semantic correctness. Preview and Development have no project variables, so production Neon, production R2 write, webhook, and cron credentials are not configured there.
 
 ## Migration inventory and controlled plan
 
@@ -60,7 +63,7 @@ If migration fails, do not use `migrate:down`, schema push, or SQL edits reflexi
 
 ### Gate B — first CMS deployment (requires separate explicit authorization)
 
-After a successful Gate A verification, the operator must separately authorize deployment of the exact CMS Git SHA to the linked Vercel Production project. Verify Production-only variables by name/scope, correct root (`.`), Next.js framework, Node 24.x, `iad1`, domain association for `cms.sebastianlevano.com`, and the cron declaration before deployment. Do not deploy from an unverified Vercel configuration.
+After a successful Gate A verification, the operator must separately authorize activation/deployment of the exact CMS Git SHA to the linked Vercel Production project. The current Ready deployment is already that reviewed SHA, but it must not be assumed to include environment edits made after its build. Verify Production-only variables by name/scope, correct root (`.`), Next.js framework, Node 24.x, `iad1`, domain association for `cms.sebastianlevano.com`, and the cron declaration before any deployment or redeployment.
 
 Post-deploy, check only safe routes first: HTTPS, `/admin` page reachability, anonymous user/cron denial, robots, database-backed public API health, and Vercel runtime logs with secrets redacted. A valid signed webhook, scheduled cron execution, first administrator creation, and a production R2 write each remain separate approvals.
 
@@ -81,17 +84,16 @@ Do not bootstrap an administrator, upload a R2 fixture, or send a valid signed r
 | `bun run build` | PASS | Used process-scoped synthetic non-production configuration. It compiled successfully; it does not verify deployed environment values, Neon connectivity, R2, or webhook delivery. |
 | Read-only Neon identity/migration query | PASS | `SELECT`-only query described above; no migration/status runner used against production. |
 | Public DNS/TLS/negative-auth smoke tests | PASS, limited | Results recorded in the evidence table; no authenticated or mutating requests. |
-| Vercel project/domain/env inspection | BLOCKED | No authenticated Vercel CLI available in this environment. |
+| Vercel project/deployment/domain/env inspection | PASS | Authenticated CLI verified the project, Production release SHA/ref, alias, Production variable names, and empty Preview/Development scopes. It did not display values. |
 | Production migration/deploy | NOT RUN | Not authorized by this prompt. |
 
 ## Remaining operator actions, in order
 
-1. In the CMS Vercel Production environment, confirm the exact source-derived variable names and scopes. Replace any `BLOG_REVALIDATION_URL` setting with `PORTFOLIO_REVALIDATION_URL`; do not disclose values. Keep production credentials out of Preview.
-2. Confirm the portfolio Production project has `PAYLOAD_CMS_URL` and the matching `BLOG_REVALIDATION_SECRET`, without exposing values.
-3. In Vercel, confirm repository `lecav30/cms-portfolio`, branch `main`, root `.`, Next.js framework, Node 24.x, `iad1`, `cms.sebastianlevano.com` attachment, and that the `17 3 * * *` cron schedule is accepted by the selected plan.
-4. Confirm the Neon restore/backup procedure and explicitly authorize Gate A against the fresh database identified above.
-5. After the separately authorized migration succeeds, explicitly authorize Gate B deployment of the exact reviewed SHA.
-6. After deployment, separately authorize production admin bootstrap, R2 lifecycle verification against `media.sebastianlevano.com`, valid signed revalidation delivery, and cron execution observation.
+1. Before Gate A, create/verify the Neon restore point or backup/recovery method for the freshly verified target.
+2. Explicitly authorize Gate A against that exact fresh Neon database and the three named migrations. The exact authorization wording is requested below.
+3. After successful migration verification, separately authorize Gate B activation/deployment so the corrected Production environment is unquestionably active in the CMS runtime.
+4. Confirm the portfolio Production project has `PAYLOAD_CMS_URL` and the matching `BLOG_REVALIDATION_SECRET`, without exposing values, then separately authorize a valid signed delivery fixture.
+5. Separately authorize production admin bootstrap, R2 lifecycle verification against `media.sebastianlevano.com`, and cron execution observation.
 
 ## Git hygiene
 
