@@ -3,11 +3,11 @@
 Date: 2026-10-31  
 Repository: `lecav30/cms-portfolio`  
 Branch / reviewed commit: `main` / `6d5765d` (`origin/main` matched)  
-Scope: read-only production preflight. No production migration, deployment, administrator bootstrap, R2 write, DNS/provider change, or Git push was performed.
+Scope: controlled Gate A migration release plus read-only verification. No CMS deployment, administrator bootstrap, R2 write, DNS/provider change, or Git push was performed.
 
 ## Decision
 
-**Gate A — READY FOR EXPLICIT MIGRATION AUTHORIZATION.** This is not authorization to migrate: no production write has been made.
+**Gate A — COMPLETE.** The operator explicitly authorized the reviewed migration chain for the verified fresh Neon target. All three migrations completed successfully in batch 1 and were verified afterwards.
 
 The resumed read-only preflight verified the linked Vercel Production project, its current deployment, the required CMS variable names and Production-only scopes, and the fresh direct-TLS Neon target. The operator's correction is reflected in Vercel: `PORTFOLIO_REVALIDATION_URL` is present and `BLOG_REVALIDATION_URL` is absent from the Production list.
 
@@ -21,7 +21,9 @@ Gate B (configuration activation/any subsequent CMS deployment) remains a separa
 | Required local runtime | PASS | `nvm use 24.22.1` selected Node `v24.22.1`; Bun was `1.1.18`. The initially selected shell Node was `v24.14.1`, below the package engine, so all validation commands used Node `v24.22.1`. |
 | CMS public hostname and deployment | PASS, limited | HTTPS `GET /` returned `200`. Vercel reports a Ready Production deployment of `lecav30/cms-portfolio` ref `main` at `6d5765d5837283753def1c878cde58e9e249f7de`, with `cms.sebastianlevano.com` listed as an alias. This does not prove the later environment edit is active in that existing deployment. |
 | CMS public security smoke test | PASS, limited | `GET /admin` returned `200` (page reachability only); anonymous `GET /api/users` returned `403`; anonymous `GET /api/internal/revalidation-jobs/run` returned `401`; `/robots.txt` returned `200` and disallows `/admin/` and `/api/`. No authenticated API action was attempted. |
-| Neon identity / freshness | PASS | A one-time `SELECT`-only direct-TLS query reached a non-local target: database `neondb`, role `neondb_owner`, PostgreSQL `18.6`. It is not `cms_portfolio_dev`, has no public tables, no `payload_migrations` table, and no recorded migrations. No schema/data write occurred. |
+| Neon identity / freshness | PASS | Immediately before migration, a direct-TLS query reached non-local database `neondb` as `neondb_owner` on PostgreSQL `18.6`. It was not `cms_portfolio_dev`, had no public tables, and had no recorded migrations. |
+| Authorized migration execution | PASS | `bun run migrate` applied exactly the three reviewed migrations in order. No schema push, down migration, reset, deployment, R2 operation, or admin bootstrap was used. |
+| Post-migration state | PASS | `migrate:status` reports all three migrations ran in batch 1. Read-only checks confirm `users`, `categories`, `tags`, `media`, `posts`, `payload_jobs`, and `payload_jobs_log` exist. |
 | R2 public hostname | BLOCKED | `media.sebastianlevano.com` resolved through Cloudflare and HTTPS worked, but a root request returned `404`. That is not proof of bucket-object delivery or custom-domain mapping. No production object was written. |
 | Portfolio receiver | PASS, limited | Previously observed public `GET /blog` returned `200`; an unsigned `POST /api/internal/revalidate` returned `401`. This confirms receiver reachability and unsigned denial only, not shared-secret equality or valid delivery. |
 | Vercel project configuration | PASS | Authenticated CLI inspection confirms project `cms-portfolio` under `own-projects`, Next.js, Node `24.x`, effective root `.`, region `iad1`, and a Ready Production deployment sourced from GitHub `lecav30/cms-portfolio` `main` at the reviewed SHA. |
@@ -45,6 +47,8 @@ The following names are derived from `.env.example` and the CMS source. Values w
 
 The local ignored configuration remains evidence about that file only. Vercel now confirms names/scopes, not values or semantic correctness. Preview and Development have no project variables, so production Neon, production R2 write, webhook, and cron credentials are not configured there.
 
+TLS maintenance note: the current `pg` dependency warns that its present `sslmode=require` handling aliases to hostname-verifying TLS, while a future major version will follow libpq semantics. No TLS verification was disabled for this release. Before upgrading to that major dependency line, explicitly review using `sslmode=verify-full` in the operator-controlled database URL.
+
 ## Migration inventory and controlled plan
 
 The ordered, reviewed migration chain is:
@@ -53,11 +57,11 @@ The ordered, reviewed migration chain is:
 2. `20261029_032843_phase_03_r2_media_prefix`
 3. `20261029_202955_phase_05_blog_revalidation_jobs`
 
-The fresh target has no migration tracking table, so the entire chain is pending. Production must use the reviewed migration runner (`bun run migrate`) once, from the exact released commit, with production `DATABASE_URL`; it must never use Payload push mode, `build:with-migrations`, or a Vercel build hook. `bun run migrate:status` and post-run read-only schema/migration verification should be recorded before proceeding to deployment.
+Before Gate A, the fresh target had no migration tracking table and the entire reviewed chain was pending. It now records all three migrations in batch 1. Production used the reviewed runner (`bun run migrate`) from the reviewed release and did not use Payload push mode, `build:with-migrations`, or a Vercel build hook. Do not rerun this baseline chain; begin any later migration work with `bun run migrate:status` and a separate review.
 
-### Gate A — database migration (requires explicit authorization)
+### Gate A — database migration (completed)
 
-Before this operation, the operator must confirm the exact fresh Neon target and authorize: “apply the three reviewed migrations to the approved fresh Neon production database.” Create/verify a Neon restore point or equivalent backup and record the target identity. Recheck direct TLS target, database name, role, zero-table state, and migration list immediately before running the approved command. Stop on drift, partial state, or any unreviewed migration. Do not rerun blindly.
+The operator authorized: “apply the three reviewed CMS migrations to the verified fresh Neon production database, and no deployment.” Immediately before execution, a direct-TLS query confirmed `neondb`, `neondb_owner`, zero public tables, and no migration records. Payload then applied the three named migrations once. The subsequent status command recorded each in batch 1.
 
 If migration fails, do not use `migrate:down`, schema push, or SQL edits reflexively. Stop, preserve diagnostics without credentials, keep the CMS undeployed, and choose either a reviewed forward fix or Neon restore/branch recovery under a separate approval.
 
@@ -82,16 +86,21 @@ Do not bootstrap an administrator, upload a R2 fixture, or send a valid signed r
 | `bun run validate:revalidation` | PASS | Sender contract validation. |
 | `bun run validate:r2-config` | PASS | Configuration validation only; no cloud operation. |
 | `bun run build` | PASS | Used process-scoped synthetic non-production configuration. It compiled successfully; it does not verify deployed environment values, Neon connectivity, R2, or webhook delivery. |
-| Read-only Neon identity/migration query | PASS | `SELECT`-only query described above; no migration/status runner used against production. |
+| Pre-migration Neon identity/migration query | PASS | Direct-TLS `SELECT`-only preflight confirmed the empty approved target immediately before execution. |
+| `bun run migrate:status` before migration | PASS | All three reviewed migrations were pending. |
+| `bun run migrate` | PASS | Applied the three reviewed migrations in order to the explicitly authorized fresh target. |
+| `bun run migrate:status` after migration | PASS | All three migrations show `Ran: Yes`, batch `1`. |
+| Read-only post-migration schema query | PASS | Expected editorial and Payload jobs tables exist; migration records match the reviewed chain. |
 | Public DNS/TLS/negative-auth smoke tests | PASS, limited | Results recorded in the evidence table; no authenticated or mutating requests. |
 | Vercel project/deployment/domain/env inspection | PASS | Authenticated CLI verified the project, Production release SHA/ref, alias, Production variable names, and empty Preview/Development scopes. It did not display values. |
-| Production migration/deploy | NOT RUN | Not authorized by this prompt. |
+| Production migration | PASS | Explicitly authorized Gate A applied the three reviewed migrations once and post-run status/schema checks passed. |
+| CMS deployment / redeployment | NOT RUN | Not authorized by this prompt. |
 
 ## Remaining operator actions, in order
 
-1. Before Gate A, create/verify the Neon restore point or backup/recovery method for the freshly verified target.
-2. Explicitly authorize Gate A against that exact fresh Neon database and the three named migrations. The exact authorization wording is requested below.
-3. After successful migration verification, separately authorize Gate B activation/deployment so the corrected Production environment is unquestionably active in the CMS runtime.
+1. Record/verify the Neon restore point or backup/recovery method for the now-migrated target. It was not independently inspected during this CLI run and remains an operational follow-up.
+2. Gate A is complete. Do not rerun the migration chain: future checks must begin with `bun run migrate:status` and stop on drift.
+3. Separately authorize Gate B activation/deployment so the corrected Production environment is unquestionably active in the CMS runtime.
 4. Confirm the portfolio Production project has `PAYLOAD_CMS_URL` and the matching `BLOG_REVALIDATION_SECRET`, without exposing values, then separately authorize a valid signed delivery fixture.
 5. Separately authorize production admin bootstrap, R2 lifecycle verification against `media.sebastianlevano.com`, and cron execution observation.
 
@@ -99,4 +108,4 @@ Do not bootstrap an administrator, upload a R2 fixture, or send a valid signed r
 
 This task adds only this report. A pre-existing user change to `.gitignore` was intentionally left unstaged and unmodified; it adds broad `.env*` and `.vercel` ignore patterns, and should be reviewed separately because `.env*` also matches `.env.example` (already tracked, so not removed).
 
-No push, deployment, migration, provider mutation, admin creation, or production R2 object operation occurred.
+The only production mutation in this release was the explicitly authorized three-migration batch. No deployment, administrator creation, R2 object operation, DNS/provider configuration change, or push occurred.
