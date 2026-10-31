@@ -3,15 +3,15 @@
 Date: 2026-10-31  
 Repository: `lecav30/cms-portfolio`  
 Branch / reviewed commit: `main` / `6d5765d` (`origin/main` matched)  
-Scope: controlled Gate A migration release plus read-only verification. No CMS deployment, administrator bootstrap, R2 write, DNS/provider change, or Git push was performed.
+Scope: controlled Gate A migration release and Gate B Production redeployment plus verification. No administrator bootstrap, R2 write, DNS/provider change, signed webhook, Cron execution, or Git push was performed.
 
 ## Decision
 
-**Gate A — COMPLETE.** The operator explicitly authorized the reviewed migration chain for the verified fresh Neon target. All three migrations completed successfully in batch 1 and were verified afterwards.
+**Gate A and Gate B — COMPLETE.** The operator explicitly authorized the reviewed migration chain and then a Production CMS deployment. All three migrations completed successfully in batch 1, and the CMS was redeployed from the reviewed Production branch commit with safe anonymous-route checks passing.
 
 The resumed read-only preflight verified the linked Vercel Production project, its current deployment, the required CMS variable names and Production-only scopes, and the fresh direct-TLS Neon target. The operator's correction is reflected in Vercel: `PORTFOLIO_REVALIDATION_URL` is present and `BLOG_REVALIDATION_URL` is absent from the Production list.
 
-Gate B (configuration activation/any subsequent CMS deployment) remains a separate approval. The current Ready deployment is the reviewed `6d5765d` release, but environment edits made after that deployment must not be presumed active in its already-built runtime. Production R2 object delivery, matching webhook-secret delivery, cron invocation, and administrator bootstrap remain separate live checks after their respective approvals.
+The new Ready deployment is the reviewed `6d5765d5837283753def1c878cde58e9e249f7de` release from `main`. It was redeployed after the Production environment correction, so it receives the current scoped Production configuration. The secret values and a valid signed sender request were deliberately not read/tested. Production R2 object delivery, matching webhook-secret delivery, cron invocation, and administrator bootstrap remain separate live checks after their respective approvals.
 
 ## Evidence collected
 
@@ -29,6 +29,8 @@ Gate B (configuration activation/any subsequent CMS deployment) remains a separa
 | Vercel project configuration | PASS | Authenticated CLI inspection confirms project `cms-portfolio` under `own-projects`, Next.js, Node `24.x`, effective root `.`, region `iad1`, and a Ready Production deployment sourced from GitHub `lecav30/cms-portfolio` `main` at the reviewed SHA. |
 | Vercel environment scopes | PASS | All source-required CMS runtime names are present in Production; Vercel reports no variables in Preview or Development. Values were not read. |
 | Vercel Cron deployment | PARTIAL | Repository `vercel.json` declares `GET /api/internal/revalidation-jobs/run` at `17 3 * * *` (UTC), and anonymous denial is live. The deployed scheduler's first invocation/plan behavior remains unobserved. |
+| Authorized CMS Production redeploy | PASS | Vercel rebuilt the existing immutable `origin/main` source at `6d5765d5837283753def1c878cde58e9e249f7de`; the new Production deployment reached `Ready` and is aliased to `cms.sebastianlevano.com`. Local documentation-only commits and the unrelated dirty `.gitignore` were not uploaded. |
+| Post-deploy HTTPS/security smoke checks | PASS | `/` and `/admin` returned `200`; anonymous `GET /api/users` and anonymous `POST /api/users` returned `403`; unsigned `GET /api/internal/revalidation-jobs/run` returned `401`; `/robots.txt` returned `200` and disallows `/admin/` and `/api/`. |
 
 ## Configuration contract and scope check
 
@@ -65,9 +67,9 @@ The operator authorized: “apply the three reviewed CMS migrations to the verif
 
 If migration fails, do not use `migrate:down`, schema push, or SQL edits reflexively. Stop, preserve diagnostics without credentials, keep the CMS undeployed, and choose either a reviewed forward fix or Neon restore/branch recovery under a separate approval.
 
-### Gate B — first CMS deployment (requires separate explicit authorization)
+### Gate B — first CMS deployment (completed)
 
-After a successful Gate A verification, the operator must separately authorize activation/deployment of the exact CMS Git SHA to the linked Vercel Production project. The current Ready deployment is already that reviewed SHA, but it must not be assumed to include environment edits made after its build. Verify Production-only variables by name/scope, correct root (`.`), Next.js framework, Node 24.x, `iad1`, domain association for `cms.sebastianlevano.com`, and the cron declaration before any deployment or redeployment.
+The operator separately authorized a Production CMS deployment. Vercel redeployed the existing immutable deployment source from GitHub `lecav30/cms-portfolio` `main` at `6d5765d5837283753def1c878cde58e9e249f7de`; the new deployment reached `Ready` in `iad1` and carries `cms.sebastianlevano.com` as an alias. This source commit was already available on `origin/main`. The three newer local commits are report-only and were intentionally not pushed or deployed. The unrelated `.gitignore` change was also excluded.
 
 Post-deploy, check only safe routes first: HTTPS, `/admin` page reachability, anonymous user/cron denial, robots, database-backed public API health, and Vercel runtime logs with secrets redacted. A valid signed webhook, scheduled cron execution, first administrator creation, and a production R2 write each remain separate approvals.
 
@@ -94,13 +96,14 @@ Do not bootstrap an administrator, upload a R2 fixture, or send a valid signed r
 | Public DNS/TLS/negative-auth smoke tests | PASS, limited | Results recorded in the evidence table; no authenticated or mutating requests. |
 | Vercel project/deployment/domain/env inspection | PASS | Authenticated CLI verified the project, Production release SHA/ref, alias, Production variable names, and empty Preview/Development scopes. It did not display values. |
 | Production migration | PASS | Explicitly authorized Gate A applied the three reviewed migrations once and post-run status/schema checks passed. |
-| CMS deployment / redeployment | NOT RUN | Not authorized by this prompt. |
+| CMS Production redeploy | PASS | Authorized redeploy of the immutable `origin/main` source reached `Ready`; it used the existing CMS project and Production configuration. |
+| Production HTTPS/admin/anonymous-security checks | PASS | Root and `/admin` are reachable over HTTPS; anonymous Users reads/writes and unsigned Cron execution are denied as expected. |
 
 ## Remaining operator actions, in order
 
 1. Record/verify the Neon restore point or backup/recovery method for the now-migrated target. It was not independently inspected during this CLI run and remains an operational follow-up.
 2. Gate A is complete. Do not rerun the migration chain: future checks must begin with `bun run migrate:status` and stop on drift.
-3. Separately authorize Gate B activation/deployment so the corrected Production environment is unquestionably active in the CMS runtime.
+3. Gate B is complete. Monitor the Ready deployment and do not run migrations again unless a separately reviewed future migration is introduced.
 4. Confirm the portfolio Production project has `PAYLOAD_CMS_URL` and the matching `BLOG_REVALIDATION_SECRET`, without exposing values, then separately authorize a valid signed delivery fixture.
 5. Separately authorize production admin bootstrap, R2 lifecycle verification against `media.sebastianlevano.com`, and cron execution observation.
 
@@ -108,4 +111,4 @@ Do not bootstrap an administrator, upload a R2 fixture, or send a valid signed r
 
 This task adds only this report. A pre-existing user change to `.gitignore` was intentionally left unstaged and unmodified; it adds broad `.env*` and `.vercel` ignore patterns, and should be reviewed separately because `.env*` also matches `.env.example` (already tracked, so not removed).
 
-The only production mutation in this release was the explicitly authorized three-migration batch. No deployment, administrator creation, R2 object operation, DNS/provider configuration change, or push occurred.
+The only production mutations in this release were the explicitly authorized three-migration batch and the Vercel redeployment of the existing reviewed source. No administrator creation, R2 object operation, signed webhook, Cron execution, DNS/provider configuration change, or push occurred.
