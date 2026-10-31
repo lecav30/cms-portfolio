@@ -1,102 +1,117 @@
-# Phase 8H — Production end-to-end validation preflight
+# Phase 8H — Production end-to-end validation
 
-Date: 2026-10-31  
-Repository: `lecav30/cms-portfolio`  
-Scope completed: Stage 0 read-only preflight only. No Gate H1 fixture, R2 object, editorial record, job execution, Cron invocation, webhook delivery, migration, deployment, environment/security setting, or Git push was performed.
+Date: 2026-10-31
+Repository: `lecav30/cms-portfolio` (`main`)
+Scope: Stage 0 preflight and the explicitly authorized Gate H1 scoped editorial/media fixture test. No authenticated Cron invocation, replay, migration, deployment, provider-setting change, administrator change, or Git push was performed.
+
+## Verdict
+
+**BLOCKED — signed production cache revalidation is rejected by the portfolio receiver.**
+
+The authorized fixture demonstrated production Media upload, R2 persistence, HTTPS public delivery, draft isolation, authenticated editorial creation, and exact fixture cleanup. Publishing queued durable jobs, and Payload's normal post-response runner attempted delivery without a direct Cron call. The receiver returned `401` on the failed attempts, so the public portfolio cache lifecycle could not be certified. This is consistent with a production shared-secret or receiver-configuration mismatch, but values were deliberately not read or compared.
 
 ## Gate status
 
-| Gate | Status | Boundary |
+| Gate | Status | Evidence / boundary |
 | --- | --- | --- |
-| Stage 0 — preflight | PASS | Production targets, deployment metadata, public route behavior, baseline counts, and runner constraints were inspected read-only. |
-| Gate H1 — scoped editorial/media fixture | **AWAITING EXPLICIT AUTHORIZATION** | No production editorial or R2 write has occurred. |
-| Gate H2 — authenticated Cron/job runner | **NOT AUTHORIZED / NOT TESTED** | The runner was not invoked. |
+| Stage 0 — read-only preflight | PASS | Production targets, deployment metadata, public route behavior, baseline counts, and runner constraints were inspected read-only. |
+| Gate H1 — scoped editorial/media fixture | PARTIAL / CLEANED | Only one uniquely prefixed fixture set was created and removed. Media, draft isolation, publish queueing, and exact cleanup passed; signed delivery/cache refresh is blocked by `401`. |
+| Gate H2 — authenticated Cron/job runner | **NOT AUTHORIZED / NOT TESTED** | The route was not invoked and replay was not run. |
 
-## Verified production targets
+## Verified targets and baseline
 
 | Component | Result | Evidence |
 | --- | --- | --- |
-| CMS deployment | PASS | Vercel reports Ready Production deployment `cms-portfolio-iwtiltuw5-sebastianlevano.vercel.app`, aliased to `cms.sebastianlevano.com`, from `main` commit `6d5765d5837283753def1c878cde58e9e249f7de`. |
-| Portfolio deployment | PASS | Vercel reports Ready Production deployment `portfolio-bw9p0vg0u-sebastianlevano.vercel.app`, aliased to `www.sebastianlevano.com`, from `main` commit `92b9c5987798b1ad4bc96cdd2ebc5ee346cb7b6f`. The portfolio repository was not modified. |
-| Neon database | PASS | Direct-TLS read-only query reached non-local PostgreSQL `18.6`; all three reviewed migrations are recorded in batch `1`. No connection string, role, or credential is recorded here. |
-| R2 hostname | PARTIAL | `media.sebastianlevano.com` served HTTPS and returned `404` at `/`, which is expected for a bucket root without an object and does not establish object delivery. An exact fixture URL is required under Gate H1. |
-| CMS/portfolio config names | PASS, presence only | CMS Production contains `DATABASE_URL`, `PAYLOAD_SECRET`, `NEXT_PUBLIC_SERVER_URL`, `CORS_ORIGINS`, all six `R2_*` names, `PORTFOLIO_REVALIDATION_URL`, `BLOG_REVALIDATION_SECRET`, and `CRON_SECRET`. Portfolio Production contains `PAYLOAD_CMS_URL` and `BLOG_REVALIDATION_SECRET`. Values and equality of the shared secret were not read. `INITIAL_ADMIN_*` is absent, as expected. |
+| CMS deployment | PASS | Vercel reported Ready Production deployment `cms-portfolio-iwtiltuw5-sebastianlevano.vercel.app`, aliased to `cms.sebastianlevano.com`, from `main` commit `6d5765d5837283753def1c878cde58e9e249f7de`. |
+| Portfolio deployment | PASS | Vercel reported Ready Production deployment `portfolio-bw9p0vg0u-sebastianlevano.vercel.app`, aliased to `www.sebastianlevano.com`, from `main` commit `92b9c5987798b1ad4bc96cdd2ebc5ee346cb7b6f`. The portfolio repository was not modified. |
+| Neon database | PASS | A direct-TLS read-only query reached non-local PostgreSQL `18.6`; the three reviewed migrations are recorded in batch `1`. No DSN, role, or credential is recorded. |
+| R2 hostname | PASS for fixture | The exact uploaded fixture URL on `media.sebastianlevano.com` returned HTTPS `200` with `image/png`. |
+| CMS/portfolio config names | PASS, presence only | CMS Production contains the required database, Payload, R2, `PORTFOLIO_REVALIDATION_URL`, `BLOG_REVALIDATION_SECRET`, and `CRON_SECRET` names. Portfolio Production contains `PAYLOAD_CMS_URL` and `BLOG_REVALIDATION_SECRET`. Values and secret equality were not read. `INITIAL_ADMIN_*` is absent. |
 
-## Database baseline
+The baseline and ending state for persistent editorial data are identical:
 
-The read-only production baseline was:
+| Resource | Before | After |
+| --- | ---: | ---: |
+| Users | 1 | 1 |
+| Categories | 0 | 0 |
+| Tags | 0 | 0 |
+| Media | 0 | 0 |
+| Posts | 0 | 0 |
+| Published posts | 0 | 0 |
+| Draft posts | 0 | 0 |
 
-| Resource | Count |
-| --- | ---: |
-| Users | 1 |
-| Categories | 0 |
-| Tags | 0 |
-| Media | 0 |
-| Posts | 0 |
-| Published posts | 0 |
-| Draft posts | 0 |
-| Durable job groups / jobs | 0 / 0 |
-
-The recorded migration chain is exactly:
+The applied migration chain is:
 
 1. `20261029_025459_phase_02_editorial_collections`
 2. `20261029_032843_phase_03_r2_media_prefix`
 3. `20261029_202955_phase_05_blog_revalidation_jobs`
 
-## Public endpoint and access preflight
+## Stage 0 public security preflight
 
 | Check | Result | Observed status / boundary |
 | --- | --- | --- |
-| `GET /admin` | PASS | `200`; this checks reachability, not a logged-in browser session. |
-| `GET /api/posts?limit=1` | PASS | `200`, with zero public documents and `totalDocs: 0`. |
-| Anonymous `GET /api/users` | PASS | Payload returned `403`. |
-| Anonymous `POST /api/posts` | PASS | Payload returned `403`; no document was created. |
-| Portfolio `GET /blog` | PASS | `200`, with the expected empty-content behavior. |
-| Unsigned portfolio revalidation POST | PASS | `401`; this confirms the receiver rejects unsigned requests only. |
-| Public media hostname root | PARTIAL | HTTPS `404`; an object-level request is required to validate R2 delivery. |
+| CMS `GET /admin` | PASS | `200`; reachability only, not a browser login assertion. |
+| CMS `GET /api/posts?limit=1` | PASS | `200`, zero public documents before the fixture. |
+| Anonymous CMS `GET /api/users` | PASS | `403`. |
+| Anonymous CMS `POST /api/posts` | PASS | `403`; no document was created. |
+| Portfolio `GET /blog` | PASS | `200`, empty-content behavior before the fixture. |
+| Unsigned portfolio revalidation POST | PASS | `401`; this proves unsigned rejection only. |
+| Media hostname root | INCONCLUSIVE | HTTPS `404` at bucket root is expected and does not prove object delivery. |
 
-The existing ignored local admin test-credential file is present with mode `0600`. Its values were not read into output. If Gate H1 is approved, it can be used only in memory to obtain an authenticated CMS session; tokens/cookies will be stored only in short-lived `0600` temporary files and removed after each test.
+## Gate H1 fixture execution
 
-## Durable job and Cron safety assessment
+One collision-resistant `phase-08h-…` prefix was held in a private `0600` temporary manifest. It contained only returned fixture IDs, slugs, and the exact object key/URL—never credentials, tokens, or unrelated production identifiers. A short-lived authenticated header was also stored privately and was not logged.
 
-`GET /api/internal/revalidation-jobs/run` accepts only an exact `Bearer CRON_SECRET`, then acquires a PostgreSQL advisory lock and runs at most **10** jobs sequentially. It filters to queue `blog-revalidation` and task `blog-revalidation`; it cannot run arbitrary Payload queues. The current baseline has no jobs.
+| Step | Result | Observed evidence |
+| --- | --- | --- |
+| Create fixture taxonomy | PASS | Two uniquely prefixed Categories and one Tag were created through authenticated CMS APIs. The second Category was reserved for a planned move test and was removed unused once delivery failed. |
+| Upload valid image | PASS | The small PNG was accepted through Payload's multipart REST contract (`_payload` plus `file`); returned metadata identified an HTTPS public URL and `image/png`. The creation-response status was not retained because a local zsh reserved-variable error occurred after the request; R2 and public retrieval independently prove the upload completed. |
+| Exact R2 object check | PASS | Scoped `HeadObject` against only the returned key found a 68-byte `image/png` object. No bucket listing was used. |
+| Public media delivery | PASS | The returned production custom-domain URL responded `200` with `Content-Type: image/png`. |
+| Create draft Post | PASS | Authenticated REST creation returned `201`, status `draft`, with the fixture Category, Tag, Media, and minimal Lexical content. |
+| Draft public isolation | PASS | Public CMS direct detail returned `404`; public slug filter returned `200` with `totalDocs: 0`; portfolio draft route returned `404`. |
+| Publish Post | PASS | Authenticated REST update returned `200`, status `published`, and a `publishedAt` timestamp. |
+| Normal post-response job handling | PASS as attempted | The hook enqueued the scoped durable revalidation work and used its normal bounded post-response runner. No direct Cron/replay/manual signature was used. |
+| Signed delivery to portfolio | **FAIL / BLOCKED** | The scoped job log recorded failed delivery attempts with sanitized receiver status `401`. No shared-secret value was read or printed. |
+| Portfolio cache lifecycle | **NOT CERTIFIED** | The retrieved category HTML contained the fixture title while the retrieved article-detail HTML did not. With failed signed delivery and dynamic/stale-while-revalidate behavior, this is not evidence of a correct cache invalidation path. No slug/category move, update, unpublish, or republish was attempted after the blocker. |
+| Fixture record cleanup | PASS | Authenticated delete calls returned `200` for the Post, Media, both Categories, and Tag. Exact IDs were used; no broad deletion occurred. |
+| Exact R2 object deletion | PASS | After deleting the Media record, the scoped `HeadObject` returned `404`. A CDN response was not used to infer storage deletion. |
+| Baseline restoration | PASS | Exact fixture-row checks were all zero and editorial/media totals returned to the baseline above. |
 
-Publishing a public post queues a durable revalidation event. The post hook also asks Next's `after()` mechanism to attempt the same bounded runner after the response. Therefore, a publish test can cause normal post-response delivery without manually calling the Cron endpoint. A direct authenticated Cron call must remain a separate Gate H2 decision: immediately before it, recheck that only the uniquely scoped fixture job is incomplete and no unrelated `blog-revalidation` job exists. Never use `revalidate:replay` against an unknown production queue.
+## Durable job state and H2 boundary
 
-## Candidate fixture plan for Gate H1
+After cleanup, two durable `blog-revalidation` jobs associated only with the deleted Phase 8H fixture remain pending, with three failed log attempts recorded. Their receiver failures classify as HTTP `401`; no raw job payload, stack trace, signature, or secret is included here. They contain no active Post, Category, Tag, Media, or R2 object fixture.
 
-If approved, the test will generate one collision-resistant prefix of the form `phase-08h-<uuid>` and create a private `0600` manifest under `/private/tmp` containing only returned fixture IDs, slugs, media object key/URL, and cleanup state. It will not contain credentials, tokens, or arbitrary production identifiers.
-
-1. Create one Category and one Tag using the prefix.
-2. Upload one small approved PNG through authenticated Payload Media, with meaningful fixture alt text. Record the returned Media ID/key/URL; verify the exact `https://media.sebastianlevano.com/...` URL returns HTTPS `200` and an image content type.
-3. Create one draft Post using the Category, Tag, optional cover Media, and a minimal representative Lexical document. Confirm direct public CMS detail/filter requests and the portfolio draft URL do not expose it.
-4. Before publishing, record the fixture queue state. Publishing, public updates/moves, unpublish/delete, and signed delivery will proceed only when the approved scope explicitly includes the normal job side effect. If an authenticated Cron trigger is needed, stop at Gate H2 rather than calling it implicitly.
-5. Cleanup uses only manifest IDs through authenticated CMS delete paths. It verifies baseline counts return to the values above. R2 deletion is checked through the exact fixture key only; no broad bucket listing/deletion is allowed.
-
-The current baseline makes a narrow runner test possible later, but it does not remove the need to recheck jobs immediately before any Gate H2 invocation.
+They were intentionally not replayed, deleted, or processed through `GET /api/internal/revalidation-jobs/run` because Gate H2 was not authorized. The runner is bounded to ten `blog-revalidation` tasks under a PostgreSQL advisory lock, but it must not be called on this queue until the signing configuration is corrected and the exact queued work is reviewed.
 
 ## Non-mutating validation
 
 | Command | Result | Notes |
 | --- | --- | --- |
 | `bun install --frozen-lockfile` | PASS | No dependency or lockfile change. |
-| `bun run typecheck` | PASS | Node `v24.22.1`. |
+| `bun run typecheck` | PASS | Run with Node `v24.22.1`. |
 | `bun run lint` | PASS | No new findings. |
-| `bun run validate:r2-config` | PASS | Static configuration behavior only; no R2 request. |
+| `bun run validate:r2-config` | PASS | Static configuration behavior only. |
 | `bun run validate:revalidation` | PASS | Sender contract/unit validation only. |
 | `bun run validate:cron-runner` | PASS | Bounded queue/lock unit validation only. |
-| `bun run build` | PASS | Process-scoped synthetic non-production values were used; this does not prove live provider behavior. |
-| `bun run validate:r2-live` | NOT RUN | Would perform storage operations; Gate H1 has not been authorized. |
-| `bun run validate:cron-runner-live` | NOT RUN | Could process a live job; Gate H2 has not been authorized. |
+| `bun run build` | PASS | Used process-scoped synthetic non-production values; it does not validate live providers. |
+| `bun run validate:r2-live` | NOT RUN | The existing script has broader live operations; the focused H1 path above was used instead. |
+| `bun run validate:cron-runner-live` | NOT RUN | Would execute production jobs and requires Gate H2. |
 
-## Risks and operator decisions
+## Required next actions
 
-- **H1 required:** approve only the scoped fixture creation and cleanup described above. This is the first authorized production write in Phase 8H.
-- **H2 required separately:** an authenticated Cron request, replay, or any explicit job runner execution must not occur until the live queue is rechecked and the exact intended work is approved.
-- **Deployment Protection:** current production public reads work at the CMS REST boundary, but no Phase 8H change was made to this policy. Keep Payload access controls as the enforcement layer for users and editorial mutations.
-- **R2 deletion cache:** a stale CDN `200` after deletion is not proof the object remains. Object storage verification later must use the scoped fixture key.
-- **No oversized upload:** the test will use one small valid image only; it will not reproduce the historical oversized-upload failure against production.
+1. Operator: verify—without sending values in chat—that Production `BLOG_REVALIDATION_SECRET` has the exact same value in the CMS and portfolio Vercel projects, and that the CMS `PORTFOLIO_REVALIDATION_URL` points to the deployed portfolio receiver path.
+2. Operator: redeploy whichever project receives the corrected Production environment value, if Vercel requires a redeploy for that variable to take effect. No application code change is indicated by this test.
+3. Re-run a read-only check of the fixture-specific job queue. Do not replay unknown jobs.
+4. If desired, grant a new scoped authorization that names which pending fixture jobs may be processed, or repeat the full fixture test with a fresh prefix after the configuration correction. Any direct authenticated Cron invocation remains Gate H2 and requires separate approval.
+
+## Risks and boundaries
+
+- Secret equality cannot be verified by presence-only checks. A successful signed delivery is the necessary end-to-end proof.
+- Portfolio routes inherit a dynamic root layout and use tagged/stale-while-revalidate fetching. A first request after a valid invalidation is not proof of instant freshness; a follow-up bounded observation is required.
+- The historical oversized-upload failure was not reproduced. This validation used one small allowed PNG only.
+- No migrations, deployments, R2/provider configuration changes, administrator changes, signed manual webhook requests, Cron calls, or replay commands were made.
 
 ## Git
 
-This report is the only intended tracked change for Stage 0. The pre-existing `.gitignore` modification remains unstaged and untouched. No push occurred.
+The only intended tracked change is this report. The pre-existing `.gitignore` modification remains unstaged and untouched. No push occurred.
