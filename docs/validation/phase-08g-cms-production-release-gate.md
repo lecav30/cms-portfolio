@@ -3,15 +3,15 @@
 Date: 2026-10-31  
 Repository: `lecav30/cms-portfolio`  
 Branch / reviewed commit: `main` / `6d5765d` (`origin/main` matched)  
-Scope: controlled Gate A migration release and Gate B Production redeployment plus verification. No administrator bootstrap, R2 write, DNS/provider change, signed webhook, Cron execution, or Git push was performed.
+Scope: controlled Gate A migration release, Gate B Production redeployment, and Gate C first-administrator bootstrap/authentication validation. No R2 write, DNS/provider configuration change, signed webhook, Cron execution, or Git push was performed.
 
 ## Decision
 
-**Gate A and Gate B — COMPLETE.** The operator explicitly authorized the reviewed migration chain and then a Production CMS deployment. All three migrations completed successfully in batch 1, and the CMS was redeployed from the reviewed Production branch commit with safe anonymous-route checks passing.
+**Gate A and Gate B — COMPLETE. Gate C — PARTIALLY COMPLETE.** The operator explicitly authorized the reviewed migration chain, Production deployment, and one controlled bootstrap redeploy. All three migrations completed successfully in batch 1; exactly one first administrator was created; and Payload login/access controls were verified through Vercel's authenticated deployment-protection bypass.
 
 The resumed read-only preflight verified the linked Vercel Production project, its current deployment, the required CMS variable names and Production-only scopes, and the fresh direct-TLS Neon target. The operator's correction is reflected in Vercel: `PORTFOLIO_REVALIDATION_URL` is present and `BLOG_REVALIDATION_URL` is absent from the Production list.
 
-The new Ready deployment is the reviewed `6d5765d5837283753def1c878cde58e9e249f7de` release from `main`. It was redeployed after the Production environment correction, so it receives the current scoped Production configuration. The secret values and a valid signed sender request were deliberately not read/tested. Production R2 object delivery, matching webhook-secret delivery, cron invocation, and administrator bootstrap remain separate live checks after their respective approvals.
+The new Ready deployment is the reviewed `6d5765d5837283753def1c878cde58e9e249f7de` release from `main`. It was redeployed after the Production environment correction, so it receives the current scoped Production configuration. The secret values and a valid signed sender request were deliberately not read/tested. Production R2 object delivery, matching webhook-secret delivery, cron invocation, and post-bootstrap restart validation remain separate live checks after their respective approvals.
 
 ## Evidence collected
 
@@ -31,6 +31,11 @@ The new Ready deployment is the reviewed `6d5765d5837283753def1c878cde58e9e249f7
 | Vercel Cron deployment | PARTIAL | Repository `vercel.json` declares `GET /api/internal/revalidation-jobs/run` at `17 3 * * *` (UTC), and anonymous denial is live. The deployed scheduler's first invocation/plan behavior remains unobserved. |
 | Authorized CMS Production redeploy | PASS | Vercel rebuilt the existing immutable `origin/main` source at `6d5765d5837283753def1c878cde58e9e249f7de`; the new Production deployment reached `Ready` and is aliased to `cms.sebastianlevano.com`. Local documentation-only commits and the unrelated dirty `.gitignore` were not uploaded. |
 | Post-deploy HTTPS/security smoke checks | PASS | `/` and `/admin` returned `200`; anonymous `GET /api/users` and anonymous `POST /api/users` returned `403`; unsigned `GET /api/internal/revalidation-jobs/run` returned `401`; `/robots.txt` returned `200` and disallows `/admin/` and `/api/`. |
+| Gate C bootstrap preflight | PASS | Direct-TLS read-only check found zero Users. `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` were present in Vercel Production only; the local ignored test-credential file was mode `0600` and key presence was checked without reading values into output. |
+| Gate C first administrator creation | PASS | The single authorized bootstrap redeploy reached Ready. Before a Payload request, Users count was `0`; after an authenticated Vercel-bypass request reached Payload, the count was exactly `1`. |
+| Gate C login and authenticated API | PASS, protected path | Valid Payload login returned `200`; an invalid-password login returned `401`; authenticated `GET /api/users` returned `200` with one document. Credentials, token, cookie, email, and response body were never logged; temporary session artifacts were removed. |
+| Gate C anonymous API restrictions | PASS, protected path | Through the Vercel bypass, anonymous `GET /api/users` and anonymous `POST /api/users` both returned Payload `403`. |
+| Gate C public access / restart non-repetition | BLOCKED | Direct public CMS requests now receive Vercel Authentication `302` before Payload; `/admin` also redirects to Vercel SSO. The one-time variables have been removed from Vercel Production, but no subsequent deployment/restart was authorized, so persistence/no-duplicate behavior after restart remains untested. |
 
 ## Configuration contract and scope check
 
@@ -73,9 +78,19 @@ The operator separately authorized a Production CMS deployment. Vercel redeploye
 
 Post-deploy, check only safe routes first: HTTPS, `/admin` page reachability, anonymous user/cron denial, robots, database-backed public API health, and Vercel runtime logs with secrets redacted. A valid signed webhook, scheduled cron execution, first administrator creation, and a production R2 write each remain separate approvals.
 
-### Gate C — separately authorized live-data operations
+### Gate C — first administrator bootstrap and authentication (partially completed)
 
-Do not bootstrap an administrator, upload a R2 fixture, or send a valid signed revalidation event as part of Gates A or B. Each requires its own scoped operator approval, disposable-fixture/cleanup plan, and evidence. This protects the fresh production database and bucket from accidental content or account creation.
+The existing guarded `onInit` path requires both `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD`, counts Users with access override, and creates an account only if the count is zero. The operator provisioned the two values in Vercel Production only and separately authorized exactly one redeploy. A direct preflight observed zero users; after a Payload request using Vercel's authenticated protection bypass, the count was exactly one.
+
+Payload authentication was tested without disclosing credentials: valid login returned `200`; invalid password returned `401`; a token derived in memory was used for authenticated Users access (`200`, one document); and anonymous Users read/create calls were rejected (`403`) when assessed behind the same deployment-protection bypass. Temporary token/cookie/response files were removed after the checks.
+
+Immediately after validation, `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` were removed from Vercel Production. No redeploy followed, by instruction. Consequently the current immutable deployment may still retain its original bootstrap environment until it is replaced; this is not a credential disclosure, but it means non-repetition has not yet been proven. A separately authorized clean redeploy is required to verify that the existing administrator remains usable and the count remains one.
+
+**Deployment-protection blocker:** direct requests to the current production CMS now receive Vercel Authentication `302` before reaching Payload, including `/admin` and `/api/users`. This protects the CMS browser surface, but it also blocks the portfolio's required anonymous published-content REST reads. The bypass-based tests prove Payload behavior only; they do not make the public API reachable. Review Vercel Deployment Protection/SSO policy in a separate approved configuration task before portfolio production integration can be declared ready.
+
+### Separately authorized remaining live-data operations
+
+The first-administrator bootstrap is complete. Do not upload an R2 fixture, send a valid signed revalidation event, execute a Cron job, or create further editorial data without its own scoped operator approval, disposable-fixture/cleanup plan, and evidence.
 
 ## Commands and local validation
 
@@ -98,17 +113,24 @@ Do not bootstrap an administrator, upload a R2 fixture, or send a valid signed r
 | Production migration | PASS | Explicitly authorized Gate A applied the three reviewed migrations once and post-run status/schema checks passed. |
 | CMS Production redeploy | PASS | Authorized redeploy of the immutable `origin/main` source reached `Ready`; it used the existing CMS project and Production configuration. |
 | Production HTTPS/admin/anonymous-security checks | PASS | Root and `/admin` are reachable over HTTPS; anonymous Users reads/writes and unsigned Cron execution are denied as expected. |
+| Controlled bootstrap redeploy | PASS | The one authorized redeploy reached Ready and bootstrapped exactly one administrator. |
+| Valid / invalid Payload login | PASS | `200` / `401`, respectively, through the authorized deployment-protection bypass. |
+| Authenticated / anonymous Users API | PASS, protected path | Authenticated `GET` was `200` with one document; anonymous `GET` and `POST` were `403` behind the same bypass. |
+| Bootstrap variable removal | PASS | Both `INITIAL_ADMIN_*` names were removed from Vercel Production; no follow-up deployment occurred. |
+| Post-removal restart / public CMS REST reachability | BLOCKED | Requires separate deployment authorization; direct public API requests currently receive Vercel Authentication `302`. |
 
 ## Remaining operator actions, in order
 
 1. Record/verify the Neon restore point or backup/recovery method for the now-migrated target. It was not independently inspected during this CLI run and remains an operational follow-up.
 2. Gate A is complete. Do not rerun the migration chain: future checks must begin with `bun run migrate:status` and stop on drift.
 3. Gate B is complete. Monitor the Ready deployment and do not run migrations again unless a separately reviewed future migration is introduced.
-4. Confirm the portfolio Production project has `PAYLOAD_CMS_URL` and the matching `BLOG_REVALIDATION_SECRET`, without exposing values, then separately authorize a valid signed delivery fixture.
-5. Separately authorize production admin bootstrap, R2 lifecycle verification against `media.sebastianlevano.com`, and cron execution observation.
+4. If desired, separately authorize one clean Production redeploy after bootstrap-variable removal. Verify valid admin login, no duplicate creation, and a final Users count of one; do not re-add bootstrap variables.
+5. Separately authorize a review/change of Vercel Deployment Protection so required public published-content CMS REST reads can reach Payload while administration remains protected.
+6. Confirm the portfolio Production project has `PAYLOAD_CMS_URL` and the matching `BLOG_REVALIDATION_SECRET`, without exposing values, then separately authorize a valid signed delivery fixture.
+7. Separately authorize R2 lifecycle verification against `media.sebastianlevano.com` and cron execution observation.
 
 ## Git hygiene
 
 This task adds only this report. A pre-existing user change to `.gitignore` was intentionally left unstaged and unmodified; it adds broad `.env*` and `.vercel` ignore patterns, and should be reviewed separately because `.env*` also matches `.env.example` (already tracked, so not removed).
 
-The only production mutations in this release were the explicitly authorized three-migration batch and the Vercel redeployment of the existing reviewed source. No administrator creation, R2 object operation, signed webhook, Cron execution, DNS/provider configuration change, or push occurred.
+The only production mutations in this release were the explicitly authorized three-migration batch, the Vercel redeployment of the existing reviewed source, creation of exactly one first administrator by the guarded bootstrap, and removal of the two one-time Vercel bootstrap variables. No R2 object operation, signed webhook, Cron execution, DNS/provider configuration change, or push occurred.
