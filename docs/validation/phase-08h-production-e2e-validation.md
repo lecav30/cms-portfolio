@@ -84,6 +84,135 @@ After cleanup, two durable `blog-revalidation` jobs associated only with the del
 
 They were intentionally not replayed, deleted, or processed through `GET /api/internal/revalidation-jobs/run` because Gate H2 was not authorized. The runner is bounded to ten `blog-revalidation` tasks under a PostgreSQL advisory lock, but it must not be called on this queue until the signing configuration is corrected and the exact queued work is reviewed.
 
+## Phase 8H1 — 2026-11-01 production `401` diagnosis
+
+### Contract and response-layer findings
+
+The CMS and portfolio source contracts are compatible:
+
+- CMS `src/revalidation/delivery.ts` signs HMAC-SHA256 over the exact UTF-8
+  bytes `<timestamp>.<JSON body>`, prefixes the lowercase digest with
+  `sha256=`, and sends the exact bytes it signs.
+- Portfolio `src/services/blogRevalidation/crypto.ts` constructs the same
+  bytes, requires the same signature format, and uses a length check plus a
+  timing-safe comparison.
+- Both sides require `BLOG_REVALIDATION_SECRET` to be at least 32 UTF-8 bytes.
+  CMS validates `PORTFOLIO_REVALIDATION_URL` as HTTPS and exactly
+  `/api/internal/revalidate`.
+
+The live unsigned request returned the receiver route's JSON `401`
+`{"error":"Unauthorized"}`, with JSON content type and `Cache-Control: no-store`.
+It had no Vercel Deployment Protection response header. This distinguishes the
+observed failure from Vercel protection and places it in the receiver's
+timestamp/signature validation path. It is not a successful signed probe.
+
+### Configuration and deployment observations
+
+| Check | Result | Boundary |
+| --- | --- | --- |
+| CMS Production project | PASS | `cms-portfolio` is Next.js, Node `24.x`, `iad1`; its active Production deployment is Ready and aliases `cms.sebastianlevano.com`. |
+| Portfolio Production project | PASS | `portfolio` is Next.js, Node `24.x`; its active Production deployment is Ready and aliases `www.sebastianlevano.com`. |
+| CMS Production key names/scopes | PASS | `PORTFOLIO_REVALIDATION_URL` and `BLOG_REVALIDATION_SECRET` are present and Production-only. The obsolete `BLOG_REVALIDATION_URL` is absent. |
+| Portfolio Production key names/scopes | PASS | `PAYLOAD_CMS_URL` and `BLOG_REVALIDATION_SECRET` are present and Production-only. |
+| CMS local production configuration shape | PASS | The private local deployment configuration resolves to HTTPS, host `www.sebastianlevano.com`, path `/api/internal/revalidate`, and has no credentials, query, or hash. |
+| Remote CMS URL value | UNVERIFIED | Vercel's read-only listing exposes the `PORTFOLIO_REVALIDATION_URL` key but not a safely usable decoded Config value through this session. The active runtime value cannot be inferred from local configuration. |
+| Shared secret equality | UNVERIFIED | Both values are Vercel Secrets. Presence and creation age cannot establish equality, and neither value was read, logged, or compared. |
+| Deployment activation after any last variable edit | UNVERIFIED | Both active deployments are Ready and were created during the same two-day window as the Production variables, but read-only metadata cannot prove which value revision was injected. A post-change redeploy is required. |
+
+### Root-cause assessment
+
+**Unconfirmed; highest-confidence cause is mismatched or not-yet-activated
+`BLOG_REVALIDATION_SECRET` values.** The source signing formats match, the
+receiver route—not Deployment Protection—returned the `401`, and the CMS
+configuration names are correct. A wrong active remote destination or an
+exceptional clock-skew problem cannot be ruled out without a future authorized
+signed delivery, so neither is claimed resolved.
+
+### Read-only job inventory and recovery safety
+
+The current production `blog-revalidation` queue contains exactly these two
+records, with no unrelated jobs:
+
+| Job ID | Operation | Pending | Error flag | Attempts |
+| ---: | --- | --- | --- | ---: |
+| 1 | `publish` | Yes | Yes | 3 |
+| 2 | `delete` | Yes | No | 2 |
+
+Both reference only the already-deleted Phase 8H fixture. Reprocessing them
+after correcting the receiver configuration is idempotent cache invalidation:
+the former publish location and its subsequent delete location should both
+resolve to the current public absence of the fixture. No Post, Media, R2
+object, Category, or Tag will be recreated by a job. Do not manually delete
+the records before confirming delivery; they are the bounded recovery evidence.
+
+The existing `bun run revalidate:replay` resets failed jobs in the whole
+`blog-revalidation` queue and then runs the same bounded queue runner. It does
+not accept individual job IDs. It is currently safe *only if* the inventory
+above is rechecked immediately before use and still contains only IDs `1` and
+`2`; otherwise it must not be used. `GET /api/internal/revalidation-jobs/run`
+also processes up to ten matching jobs and must remain uncalled without Gate H2.
+
+### Operator-only configuration procedure
+
+Do this in the Vercel dashboard without pasting a value into chat, a terminal
+command, or a repository file:
+
+1. Generate one new random shared secret of at least 32 bytes in a private
+   password manager or other secure local tool. Do not reuse `CRON_SECRET` or
+   `PAYLOAD_SECRET`.
+2. In **portfolio → Settings → Environment Variables**, replace the
+   **Production-only Secret** `BLOG_REVALIDATION_SECRET` with that value, then
+   create a new Production deployment of the existing approved portfolio
+   source. Do not change `PAYLOAD_CMS_URL`.
+3. In **cms-portfolio → Settings → Environment Variables**, set the
+   **Production-only Secret** `BLOG_REVALIDATION_SECRET` to exactly the same
+   value. Confirm the **Production-only Config**
+   `PORTFOLIO_REVALIDATION_URL` is exactly
+   `https://www.sebastianlevano.com/api/internal/revalidate`, with no query,
+   fragment, credentials, or trailing whitespace. Create a new Production
+   deployment of the existing approved CMS source.
+4. Confirm both deployments are Ready and were created after their respective
+   variable updates. Do not run Cron, replay, or create fixtures during the
+   brief mixed-secret window.
+
+This is an operator configuration/deployment action and was not performed in
+this diagnostic phase.
+
+### Required separate authorization gates
+
+After the operator confirms the configuration/redeploys are complete, provide
+one explicit authorization at a time:
+
+- **Gate H2 — scoped recovery:** authorize execution of only the current
+  `blog-revalidation` jobs **1** and **2**, after a fresh queue inventory shows
+  no other jobs. This permits the bounded runner/replay path and signed
+  delivery observation; it does not permit fixture creation or Cron execution
+  against an unknown queue.
+- **Gate H3 — controlled retest:** separately authorize a new uniquely
+  prefixed production editorial/media fixture and cleanup, including publish,
+  update/move, unpublish, delete, and normal post-response job handling. This
+  is required to prove current/previous path invalidation and cache freshness.
+
+Recovery succeeds only when the receiver returns `204`, the scoped jobs leave
+the queue without a new failed delivery, and the portfolio subsequently serves
+the expected current or absent public paths. A valid signed request is the only
+end-to-end confirmation that the secrets and active deployments match.
+
+### H1 diagnostic validation
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| CMS `bun install --frozen-lockfile` | PASS | No dependency change. |
+| CMS `bun run typecheck` | PASS | Node `v24.22.1`. |
+| CMS `bun run lint` | PASS | No new findings. |
+| CMS `bun run validate:revalidation` | PASS | Sender contract/lifecycle validation only. |
+| Portfolio `bun install --frozen-lockfile` | PASS | Read-only validation in the sibling repository. |
+| Portfolio `bun run validate:blog-revalidation` | PASS | Receiver contract/cache-target validation only. |
+| Production signed request | NOT RUN | Requires Gate H2 or a separately approved scoped live test. |
+
+The portfolio repository was not modified. Its pre-existing local branch state
+was observed but not altered.
+
 ## Non-mutating validation
 
 | Command | Result | Notes |
