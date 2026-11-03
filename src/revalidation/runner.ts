@@ -8,15 +8,19 @@ import { revalidationJobBatchLimit } from './cron'
 // invocation and is shared by the request hook, CLI scripts, and cron route.
 export const revalidationJobRunnerAdvisoryLockKey = 1_427_598_331
 
-export type RevalidationJobRunResult =
+export type RevalidationJobLockResult<T> =
   | { status: 'already-running' }
-  | {
-      noJobsRemaining: boolean
-      remainingJobsFromQueried: number
-      status: 'completed'
-    }
+  | { status: 'completed'; value: T }
 
-export const runQueuedRevalidationJobs = async (payload: Payload): Promise<RevalidationJobRunResult> => {
+/**
+ * Serializes every revalidation-job runner entry point with the same
+ * session-scoped PostgreSQL advisory lock. A session lock is intentional: a
+ * transaction lock would be released before a task handler performs delivery.
+ */
+export const withRevalidationJobRunnerLock = async <T>(
+  payload: Payload,
+  callback: () => Promise<T>,
+): Promise<RevalidationJobLockResult<T>> => {
   const client = await payload.db.pool.connect()
   let locked = false
 
@@ -26,6 +30,28 @@ export const runQueuedRevalidationJobs = async (payload: Payload): Promise<Reval
 
     if (!locked) return { status: 'already-running' }
 
+    return { status: 'completed', value: await callback() }
+  } finally {
+    try {
+      if (locked) {
+        await client.query('SELECT pg_advisory_unlock($1)', [revalidationJobRunnerAdvisoryLockKey])
+      }
+    } finally {
+      client.release()
+    }
+  }
+}
+
+export type RevalidationJobRunResult =
+  | { status: 'already-running' }
+  | {
+      noJobsRemaining: boolean
+      remainingJobsFromQueried: number
+      status: 'completed'
+    }
+
+export const runQueuedRevalidationJobs = async (payload: Payload): Promise<RevalidationJobRunResult> => {
+  const lock = await withRevalidationJobRunnerLock(payload, async () => {
     const result = await payload.jobs.run({
       limit: revalidationJobBatchLimit,
       queue: blogRevalidationQueue,
@@ -41,15 +67,15 @@ export const runQueuedRevalidationJobs = async (payload: Payload): Promise<Reval
     return {
       noJobsRemaining: result.noJobsRemaining === true,
       remainingJobsFromQueried: result.remainingJobsFromQueried,
-      status: 'completed',
     }
-  } finally {
-    try {
-      if (locked) {
-        await client.query('SELECT pg_advisory_unlock($1)', [revalidationJobRunnerAdvisoryLockKey])
-      }
-    } finally {
-      client.release()
-    }
+  })
+
+  if (lock.status === 'already-running') {
+    return lock
+  }
+
+  return {
+    ...lock.value,
+    status: 'completed',
   }
 }

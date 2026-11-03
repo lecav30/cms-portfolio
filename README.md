@@ -208,6 +208,42 @@ jobs. `bun run revalidate:jobs` runs the same bounded, locked code path from a
 trusted local/CI process. The portfolio retains its five-minute fetch fallback,
 so this is at-least-once invalidation rather than guaranteed delivery.
 
+### Exact-ID failed-job recovery
+
+`revalidate:replay` is intentionally queue-wide and is unsuitable when an
+operator must recover a known, limited set of production jobs. Inspect only
+explicit IDs first:
+
+```bash
+bun run revalidate:recover -- --id 123 --id 456
+```
+
+Inspection is read-only and prints only each selected job's ID, queue/task,
+attempt count, and state. It rejects missing, malformed, duplicated-over-limit,
+unknown, running, completed, nonfailed, wrong-queue, and wrong-task jobs. It
+never substitutes a missing ID list with a queue query.
+
+After an approved recovery plan, a local/non-production operator can run:
+
+```bash
+bun run revalidate:recover -- --id 123 --id 456 --execute --confirm-ids 123,456
+```
+
+The confirmation list must exactly match the sorted, deduplicated selection.
+The command takes the same PostgreSQL advisory lock as cron and request-driven
+runners, resets only the individually revalidated failed IDs, and invokes the
+Payload runner once per ID with `where.id.equals` and `limit: 1`. It cannot
+process another ready job from the same queue. Production-like and unverified
+targets require an additional `--allow-production` mechanical guard; that flag
+is **not** authorization. Obtain a separate, exact target-and-ID approval
+before using it against Production.
+
+Payload 3.89.0 deletes successful jobs by default. A successful exact recovery
+therefore reports either a retained completed record or `deleted-on-success`;
+the latter is normal retention behavior, not an audit-record deletion by this
+command. Failed or partial deliveries remain durable and must be re-inspected
+before any subsequent approved recovery.
+
 ## Database and migration workflow
 
 The project uses the official `@payloadcms/db-postgres` adapter with
