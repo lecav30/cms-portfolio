@@ -329,6 +329,69 @@ work remains a separate authorization.
 | Production signed request | NOT RUN — outside authorization |
 | Cron, replay, jobs, migrations, fixtures, R2 writes, deployments | NOT RUN — outside authorization |
 
+## Gate H2 — one authorized scoped recovery attempt
+
+The operator authorized one recovery attempt with the explicit boundary that a
+fresh inventory must contain only fixture jobs `1` and `2`, with no fixture
+creation, Cron-route invocation, environment change, or deployment.
+
+### Guard and execution
+
+The immediate preflight returned exactly the expected queue inventory:
+
+| Job ID | Operation | Pending | Error flag before run | Attempts before run |
+| ---: | --- | --- | --- | ---: |
+| 1 | `publish` | Yes | Yes | 3 |
+| 2 | `delete` | Yes | Yes | 3 |
+
+The existing queue-scoped recovery command was run once against that isolated
+queue using the Production CMS configuration. It reported that it reset two
+failed revalidation jobs and invoked the bounded runner once. The Cron route
+was not called.
+
+### Observed delivery outcome
+
+| Job ID | Operation | Exact receiver HTTP result | Final result of this attempt |
+| ---: | --- | ---: | --- |
+| 1 | `publish` | `401` | Failed; bounded task recorded a non-retryable receiver rejection. |
+| 2 | `delete` | `401` | Failed; bounded task recorded a non-retryable receiver rejection. |
+
+The recovery command completed its two-job pass, but **neither delivery
+succeeded**. Both jobs reached attempt `4` and remained in an error state. No
+secret, signature, request body, token, or raw job payload is included here.
+
+Per the Gate H2 stop condition, no additional delivery attempt, public-path
+probe, Cron call, replay, signed request, fixture operation, migration, R2
+operation, deployment, or environment edit was performed after either `401`
+was observed.
+
+### Required concrete corrective action
+
+The repeated application-level `401` makes the active sender/receiver
+authentication configuration the remaining blocker. Before another recovery
+attempt, the operator must use a private source of truth (for example a
+password manager) to perform this Vercel Production-only correction:
+
+1. In **portfolio**, set `BLOG_REVALIDATION_SECRET` to the intended exact
+   shared bytes and create a new Production deployment.
+2. In **cms-portfolio**, set `BLOG_REVALIDATION_SECRET` to the exact same
+   bytes; re-save `PORTFOLIO_REVALIDATION_URL` as exactly
+   `https://www.sebastianlevano.com/api/internal/revalidate`; then create a new
+   Production deployment.
+3. Confirm both deployments are Ready and were created after the variable
+   updates. Do not disclose values in chat or source control.
+
+This need not rotate the secret if the original intended value is available:
+re-saving the exact known value in both projects removes uncertainty about
+entry/whitespace and deployment activation. If it is not available, generate a
+new shared value of at least 32 bytes and treat that as a deliberate rotation.
+
+After the correction, a new explicit authorization is required before any
+replay. It must again first prove that only jobs `1` and `2` are in the
+`blog-revalidation` queue. A successful recovery requires receiver `204` for
+both jobs, completed queue records, and a separate authorized verification of
+the deleted fixture's public absence.
+
 ## Non-mutating validation
 
 | Command | Result | Notes |
