@@ -392,6 +392,37 @@ replay. It must again first prove that only jobs `1` and `2` are in the
 both jobs, completed queue records, and a separate authorized verification of
 the deleted fixture's public absence.
 
+## Post-correction controlled signed-authentication test
+
+After the operator re-saved the shared Production secret and confirmed the CMS
+destination, Vercel reported these new Ready Production deployments:
+
+| Project | Deployment | Created | Source commit |
+| --- | --- | --- | --- |
+| CMS | `dpl_JEUnHsEHvijxt3XcDsoZbwZ3xiMs` | `2026-11-03T02:46:41Z` | `6d5765d5837283753def1c878cde58e9e249f7de` |
+| Portfolio | `dpl_7jEMDt79hvHHxeeg3WDLiRnfcuMX` | `2026-11-03T02:46:53Z` | `92b9c5987798b1ad4bc96cdd2ebc5ee346cb7b6f` |
+
+One explicitly authorized, non-editorial signed request was then sent through
+the existing CMS `deliverBlogRevalidation` sender. It used a fresh UUIDv4 event
+ID and timestamp plus a collision-resistant nonexistent slug/category and a
+synthetic safe numeric post ID. It created no CMS record, R2 object, job,
+administrator, or public content. The sender emitted no secret, HMAC header,
+signature, or event ID to output.
+
+| Check | Exact result |
+| --- | --- |
+| Portfolio receiver HTTP response | **`204 No Content`** |
+| Signed receiver authentication | **PASS** |
+| Queued jobs `1` / `2` | **NOT EXECUTED** by this test |
+| Cron, replay, migrations, environment edits, editorial writes | **NOT RUN** |
+
+This establishes that the current Production portfolio receiver accepts a
+correctly signed request made with the existing CMS sender contract and the
+private production sender configuration used for this test. It does not by
+itself complete the previously failed durable CMS jobs or prove delivery from a
+deployed CMS job runner; those require their own separate authorization and
+fresh queue preflight.
+
 ## Non-mutating validation
 
 | Command | Result | Notes |
