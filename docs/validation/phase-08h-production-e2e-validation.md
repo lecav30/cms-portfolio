@@ -213,6 +213,122 @@ end-to-end confirmation that the secrets and active deployments match.
 The portfolio repository was not modified. Its pre-existing local branch state
 was observed but not altered.
 
+## Phase 8H2 — 2026-11-02 read-only deployed-authentication diagnosis
+
+### Active project and deployment evidence
+
+| Project | Production branch | Active deployment | Created | Source commit | Result |
+| --- | --- | --- | --- | --- | --- |
+| CMS `cms-portfolio` | `main` | `dpl_AaewWuzfTqhmZTVfBmRNfuwRqkXH` | `2026-10-31T03:07:36Z` | `6d5765d5837283753def1c878cde58e9e249f7de` | Ready; aliases `cms.sebastianlevano.com`. |
+| Portfolio `portfolio` | `main` | `dpl_AciviNWQsSqUZAtUU7kb5o5qHZ2P` | `2026-10-30T22:33:49Z` | `92b9c5987798b1ad4bc96cdd2ebc5ee346cb7b6f` | Ready; aliases `www.sebastianlevano.com`. |
+
+Vercel project metadata confirms that both projects are linked to their
+expected GitHub repositories and use `main` as their Production branch. The
+CMS active deployment is Node `24.x` in `iad1`; the portfolio active deployment
+is Node `24.x` in `iad1`.
+
+The CMS commits after deployed commit `6d5765d` change only validation
+documentation. The deployed CMS `delivery.ts` contains the same HMAC signing,
+timestamp, lowercase `sha256=` prefix, raw-byte body, and JSON content-type
+logic reviewed locally. The deployed portfolio receiver commit contains the
+same timestamp validation and timing-safe signature verification path.
+
+### Environment activation evidence
+
+| Project / key | Provider type / scope | Last update | Relation to active deployment |
+| --- | --- | --- | --- |
+| CMS `PORTFOLIO_REVALIDATION_URL` | Encrypted Config / Production | `2026-10-31T02:17:59Z` | Updated **before** the CMS deployment at `03:07:36Z`. |
+| CMS `BLOG_REVALIDATION_SECRET` | Secret / Production | `2026-10-30T21:57:15Z` | Created **before** the CMS deployment. |
+| Portfolio `BLOG_REVALIDATION_SECRET` | Secret / Production | `2026-10-30T22:31:17Z` | Created **before** the portfolio deployment at `22:33:49Z`. |
+
+This rules out the previously suspected stale-deployment explanation: each
+active Production deployment was created after the corresponding relevant
+variable revision. It does not reveal secret values or prove their byte-for-byte
+equality.
+
+Vercel exposes the CMS destination as an encrypted Config value, and exposes
+both `BLOG_REVALIDATION_SECRET` values only as non-readable Secrets. Its
+read-only CLI/API does not provide a supported equality comparison of the
+values actually injected into these deployments. The safe result is therefore
+**UNVERIFIABLE**, not `MATCH` or `MISMATCH`. No secret, hash, fingerprint, or
+value was printed, saved, or compared.
+
+The local ignored production configuration has the expected destination shape
+(`https`, `www.sebastianlevano.com`, `/api/internal/revalidate`, no credentials,
+query, or fragment). This is supporting evidence only; it is not a claim about
+the active remote encrypted Config value.
+
+### Alternative-cause assessment
+
+| Candidate | Assessment | Evidence / limitation |
+| --- | --- | --- |
+| Stale source or deployment environment | RULED OUT | Active deployments postdate relevant Production variable updates, and deployed commits contain the reviewed protocol code. |
+| Vercel Deployment Protection | RULED OUT | An unsigned request returned the receiver route's JSON `401` with `Cache-Control: no-store`, JSON content type, and no protection header. |
+| Sender/receiver byte-format disagreement | UNLIKELY | Deployed source matches on timestamp plus literal dot, raw JSON bytes, lowercase `sha256=` hex, and accepted JSON content type. Both local contract validators pass. |
+| Material clock skew | UNLIKELY | Public Date headers from CMS and portfolio differed from the local clock by zero and one second respectively. This is not a direct Lambda-clock measurement, but gives no evidence of a timestamp-window failure. |
+| Remote destination differs from expected receiver | UNRESOLVED | The active Config value is encrypted and cannot be decoded through a safe read-only interface. |
+| Exact shared-secret bytes differ | UNRESOLVED / MOST LIKELY REMAINING CAUSE | Receiver `401` can result from an HMAC mismatch. Vercel cannot safely read back Secret values; whitespace differences would also be byte differences because both implementations use the original secret bytes for HMAC. |
+
+The production `401` cause is therefore **unresolved**, with stale activation,
+source drift, deployment protection, and practical clock skew eliminated as
+primary explanations. It is not correct to assert a secret mismatch without a
+successful/failed authorized signed delivery or an operator's private
+out-of-band confirmation.
+
+### Read-only queue snapshot
+
+No job, Cron, replay, webhook, database, R2, migration, or deployment action
+was performed in Phase 8H2. The fresh read-only queue inventory contains only
+the same fixture-scoped jobs:
+
+| Job ID | Operation | Pending | Error flag | Attempts |
+| ---: | --- | --- | --- | ---: |
+| 1 | `publish` | Yes | Yes | 3 |
+| 2 | `delete` | Yes | Yes | 3 |
+
+The second job's attempt/error state changed after the prior report without a
+direct Cron or replay invocation from this session. Its execution source is not
+proven by the job table alone; this report records only the observed state. Both
+jobs remain safe recovery candidates because they reference the already-deleted
+fixture and can only invalidate cache locations.
+
+### Minimal follow-up recommendation
+
+No secret rotation or environment edit is justified by this read-only evidence
+alone. The smallest decisive next action is a separately authorized **Gate H2
+scoped recovery test**:
+
+> I authorize Gate H2: after a fresh read-only inventory confirms that
+> `blog-revalidation` contains only jobs `1` and `2`, run the existing bounded
+> replay/runner once against those jobs, observe only the resulting delivery
+> status and public absence of the deleted fixture, and do not create fixtures,
+> invoke the cron route, or alter environment variables.
+
+The current replay script is queue-scoped rather than ID-scoped: it resets
+failed jobs on `blog-revalidation` and invokes the bounded runner. The required
+pre-run inventory check is what makes that operation narrow enough here. A
+`204` delivery and cleared/scoped completed jobs would confirm the currently
+active deployment configuration without a secret change.
+
+If that authorized test returns `401` again, the operator should first use the
+private original secret source (for example, a password manager) to re-save the
+same exact bytes in both Production `BLOG_REVALIDATION_SECRET` entries and
+confirm the CMS Config destination in the Vercel dashboard, then redeploy
+portfolio followed by CMS. A new secret is needed only if the original value is
+unavailable or a rotation is otherwise desired. That configuration/deployment
+work remains a separate authorization.
+
+### H2 diagnostic validation
+
+| Check | Result |
+| --- | --- |
+| CMS `bun run validate:revalidation` | PASS |
+| Portfolio `bun run validate:blog-revalidation` | PASS |
+| Active deployment/project/branch metadata | PASS, read-only |
+| Production env key scope/update-time metadata | PASS, read-only; secret equality is UNVERIFIABLE |
+| Production signed request | NOT RUN — outside authorization |
+| Cron, replay, jobs, migrations, fixtures, R2 writes, deployments | NOT RUN — outside authorization |
+
 ## Non-mutating validation
 
 | Command | Result | Notes |
@@ -229,10 +345,17 @@ was observed but not altered.
 
 ## Required next actions
 
-1. Operator: verify—without sending values in chat—that Production `BLOG_REVALIDATION_SECRET` has the exact same value in the CMS and portfolio Vercel projects, and that the CMS `PORTFOLIO_REVALIDATION_URL` points to the deployed portfolio receiver path.
-2. Operator: redeploy whichever project receives the corrected Production environment value, if Vercel requires a redeploy for that variable to take effect. No application code change is indicated by this test.
-3. Re-run a read-only check of the fixture-specific job queue. Do not replay unknown jobs.
-4. If desired, grant a new scoped authorization that names which pending fixture jobs may be processed, or repeat the full fixture test with a fresh prefix after the configuration correction. Any direct authenticated Cron invocation remains Gate H2 and requires separate approval.
+1. If no configuration change is approved, authorize the narrowly scoped Gate H2
+   recovery test described above. It is the smallest conclusive production
+   delivery check and must re-inventory the queue before acting.
+2. If Gate H2 returns `401` again, operator privately verifies/re-saves the
+   exact original secret in both Production projects and confirms the CMS
+   encrypted Config destination in the Vercel dashboard, then redeploys the
+   affected project(s). Do not paste values into chat.
+3. After a successful recovery, separately authorize a fresh fixture lifecycle
+   retest (Gate H3) before certifying publish/move/unpublish/delete cache
+   invalidation. Any direct authenticated Cron invocation remains a separate
+   approval.
 
 ## Risks and boundaries
 
