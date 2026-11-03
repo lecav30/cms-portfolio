@@ -423,6 +423,89 @@ itself complete the previously failed durable CMS jobs or prove delivery from a
 deployed CMS job runner; those require their own separate authorization and
 fresh queue preflight.
 
+## Prompt 31 Gate H3 — scoped recovery preflight (read-only)
+
+### Target identity and fixture absence
+
+Both current Production deployments remain Ready:
+
+| Project | Deployment | State |
+| --- | --- | --- |
+| CMS | `dpl_JEUnHsEHvijxt3XcDsoZbwZ3xiMs` | Ready |
+| Portfolio | `dpl_7jEMDt79hvHHxeeg3WDLiRnfcuMX` | Ready |
+
+The production queue preflight found exactly two `blog-revalidation` jobs and
+no other queue entries. Both are eligible Phase 8H fixture jobs:
+
+| Job ID | Queue / task | Operation | Pending | Error | Attempts |
+| ---: | --- | --- | --- | --- | ---: |
+| 1 | `blog-revalidation` / `blog-revalidation` | `publish` | Yes | Yes | 4 |
+| 2 | `blog-revalidation` / `blog-revalidation` | `delete` | Yes | Yes | 4 |
+
+The job metadata has the expected Phase 8H shape: the publish event has only a
+current public location; the delete event has only a previous public location;
+both reference the same fixture Post ID. The raw slugs, event IDs, and payloads
+are intentionally not reproduced here.
+
+Read-only database counts are zero for Posts, Categories, Tags, and Media. The
+prior exact R2 object-head cleanup check returned `404`, and no production
+fixture write has occurred since. A read-only request to the old public
+portfolio fixture path returned `404`.
+
+### Exact-ID replay assessment
+
+The existing `scripts/replay-revalidation-jobs.ts` is **not** exact-ID scoped:
+it resets every failed job in `blog-revalidation`, then calls the standard
+runner, whose filter is task/queue scoped with a limit of ten. It must not be
+used for this Gate H3, even though this preflight currently sees only jobs `1`
+and `2`; a bounded limit is not an identity guarantee.
+
+Payload `3.89.0` does support an exact `id` argument on its underlying
+`RunJobsArgs`, but the repository has no current command that combines that
+exact run with an exact-ID-only reset of failed state. Therefore no production
+replay was performed in this phase.
+
+The minimal safe remediation is a dedicated local recovery command that:
+
+1. accepts a validated, non-empty explicit ID list;
+2. re-reads the selected records and rejects any ID not in
+   `blog-revalidation`, not in the expected task, not errored, or not exactly
+   the requested set;
+3. resets only those IDs in one constrained update; and
+4. invokes the Payload job runner once per verified ID using its exact `id`
+   selector while retaining the existing advisory lock and sequential behavior.
+
+That code requires focused tests and a review before it is used against
+Production. It must not be substituted with a direct Cron call or the existing
+blanket replay script.
+
+### Gate H3 status and required authorization
+
+**READY FOR AUTHORIZATION, NOT EXECUTED.** No job state, queued work, Cron,
+replay, fixture, R2 object, migration, environment variable, or deployment was
+changed by this preflight.
+
+After an exact-ID mechanism has been implemented and validated, the required
+authorization is:
+
+> I authorize Gate H3 to replay only production `blog-revalidation` jobs 1 and
+> 2 associated with the deleted Phase 8H fixture, using a verified
+> exact-ID-scoped mechanism, with no cron invocation, other jobs, content
+> writes, or deployments.
+
+Successful recovery must observe `204` for each delivery, terminal delivered
+state for both records, and the old public fixture path remaining `404`. A
+fresh publish/update/move/unpublish/delete lifecycle remains a separate
+production authorization after this recovery is complete.
+
+### Gate H3 local validation
+
+| Command | Result |
+| --- | --- |
+| `bun run validate:revalidation` | PASS |
+| `bun run validate:cron-runner` | PASS |
+| Production job/fixture/deployment preflight | PASS, read-only |
+
 ## Non-mutating validation
 
 | Command | Result | Notes |
