@@ -534,6 +534,77 @@ production authorization after this recovery is complete.
    invalidation. Any direct authenticated Cron invocation remains a separate
    approval.
 
+## Prompt 33 — Phase 8H5 exact-ID recovery preflight (2026-11-03)
+
+### Decision
+
+**GATE H3 NO-GO — production target identity and job state are not yet
+independently verified. No authorization request is made.**
+
+The checkout is at `d23d73f feat(cms): add safe exact-id revalidation job
+recovery`, which contains the reviewed H4 `revalidate:recover` implementation.
+Its default invocation is read-only and its execution mode requires exact IDs,
+matching `--confirm-ids`, the shared advisory lock, and a production guard.
+The unrelated unstaged `.gitignore` edit was present before this preflight and
+was not modified or staged.
+
+### Read-only observations
+
+| Item | Result | Evidence / boundary |
+| --- | --- | --- |
+| Linked CMS Vercel project | PASS | `cms-portfolio`; Next.js, Node `24.x`, root `.`, region `iad1`. |
+| Production CMS environment names | PASS, names/scopes only | `DATABASE_URL`, `PAYLOAD_SECRET`, `NEXT_PUBLIC_SERVER_URL`, `CORS_ORIGINS`, all required `R2_*`, `PORTFOLIO_REVALIDATION_URL`, `BLOG_REVALIDATION_SECRET`, and `CRON_SECRET` are listed for Production. Values were not read. |
+| Public HTTPS smoke | PASS | `HEAD /admin` returned `200` with `X-Robots-Tag: noindex, nofollow, noarchive`; public portfolio `/blog` returned `200`. |
+| Active deployment SHA/state | UNVERIFIED | The authenticated CLI deployment listing did not return an unambiguous project-scoped Production result in this session. Public Vercel headers alone do not prove the deployed source SHA. |
+| Neon identity / migration state | BLOCKED | No direct production connection was established. |
+| Jobs `1` and `2` / queue inventory | BLOCKED | No production job query was executed. |
+
+### Environment-access blocker
+
+`vercel env run --environment production` intentionally did not export two
+Production Secret values to the local process. It then loaded the already
+ignored local environment files. The resulting safe identity query reported
+the local Homebrew development database (`cms_portfolio_dev`), not Neon, and a
+read-only CLI inspection therefore found no local job `1`. This proves only
+that the attempted process was **not** pointed at Production; it did not read
+or change Production Neon, R2, jobs, Cron, deployments, or webhook state.
+
+The command was stopped at that point. No queue-wide replay, exact recovery,
+Cron invocation, migration, deployment, fixture creation, or provider edit was
+performed.
+
+### Required operator action before recovery can be considered
+
+Provide a separately controlled, read-only way to run the existing CLI against
+the verified direct Neon Production target without exporting any secret to chat
+or a tracked file. Suitable options are an operator-run private terminal with
+the full CMS Production runtime configuration already available, or a
+read-only Neon SQL/connection workflow that confirms:
+
+1. direct Neon target identity and the three applied migrations;
+2. exactly two eligible `blog-revalidation` jobs, IDs `1` and `2`, both with
+   task slug `blog-revalidation`, failed/idle state, and four attempts;
+3. no other runnable or failed `blog-revalidation` jobs; and
+4. no Posts, Categories, Tags, or Media fixtures remaining.
+
+Once that evidence is available, rerun the H5 read-only preflight. Only if it
+passes should the following separate authorization be requested:
+
+> I authorize Gate H3 to recover only production `blog-revalidation` jobs 1
+> and 2 associated with the deleted Phase 8H fixture, using
+> `revalidate:recover` with an exact-ID-scoped mechanism, with no cron
+> invocation, other jobs, content writes, migrations, or deployments.
+
+The prospective execution command, shown here but **not run**, is:
+
+```bash
+bun run revalidate:recover -- --id 1 --id 2 --execute --confirm-ids 1,2 --allow-production
+```
+
+It is valid only from the verified Production runtime context after the fresh
+preflight and explicit authorization. The command is not a substitute for the
+target check or the approval gate.
+
 ## Risks and boundaries
 
 - Secret equality cannot be verified by presence-only checks. A successful signed delivery is the necessary end-to-end proof.
