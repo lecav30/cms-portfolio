@@ -678,6 +678,42 @@ status, terminal/deleted-on-success state, unchanged queue isolation, and the
 public absence of the already-deleted fixture. Do not retry automatically if a
 delivery is not `204`.
 
+### Post-authorization runtime configuration gate (2026-11-03)
+
+The operator authorized the exact recovery and the direct-Neon read-only
+preflight was immediately repeated. It again found only jobs `1` and `2` in
+the expected failed, idle states, linked to the same cleaned fixture. No job
+state changed.
+
+Execution was then stopped **before** starting Payload because the external
+private file currently contains only `CMS_PRODUCTION_DATABASE_URL`. A safe
+Payload production runtime must not fall back to local webhook credentials,
+media configuration, or development mode (which could enable development
+schema synchronization). The recovery task needs the real server-only
+Production settings in the same restricted external source before it can send
+the receiver-compatible signed event.
+
+The operator must privately add the following names, with the existing
+`CMS_PRODUCTION_` prefix, to that `0600` file and then confirm readiness
+without sharing values:
+
+- `CMS_PRODUCTION_PAYLOAD_SECRET`
+- `CMS_PRODUCTION_BLOG_REVALIDATION_SECRET`
+- `CMS_PRODUCTION_PORTFOLIO_REVALIDATION_URL`
+- `CMS_PRODUCTION_R2_ENABLED`
+- `CMS_PRODUCTION_R2_BUCKET`
+- `CMS_PRODUCTION_R2_ENDPOINT`
+- `CMS_PRODUCTION_R2_ACCESS_KEY_ID`
+- `CMS_PRODUCTION_R2_SECRET_ACCESS_KEY`
+- `CMS_PRODUCTION_R2_PUBLIC_BASE_URL`
+
+The execution wrapper will map only those private values into the child
+process's expected server-only names, set `NODE_ENV=production`, and never
+print them or read repository `.env` files. It will not include
+`INITIAL_ADMIN_*`, invoke Cron, apply migrations, or use any queue-wide replay.
+After the runtime source is complete, repeat the direct-Neon read-only
+preflight once more immediately before the single authorized exact-ID command.
+
 ## Risks and boundaries
 
 - Secret equality cannot be verified by presence-only checks. A successful signed delivery is the necessary end-to-end proof.
