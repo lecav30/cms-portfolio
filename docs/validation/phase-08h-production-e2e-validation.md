@@ -847,6 +847,81 @@ edit, user operation, R2 write, Cron call, or portfolio change is in scope.
 > handling; no Media/R2 writes, Cron, replay, migrations, deployments,
 > environment changes, or unrelated content/user operations.
 
+## Prompt 35 — Phase 8H7 authorized Production editorial lifecycle (2026-11-03)
+
+### Authorization and fixture boundary
+
+The operator explicitly authorized Gate H7-WRITE. The harness repeated the
+direct-Neon, read-only baseline check before login, then used the existing
+administrator only to create and mutate a unique `phase-08h7-*` text fixture.
+The private `0600` manifest recorded only exact resource IDs and slugs, never
+credentials or session material. No Tag, Media, or R2 object was needed.
+
+Fixture scope:
+
+- two temporary Categories, required solely to exercise a category move;
+- one temporary Post; and
+- no changes to the existing User, application configuration, deployments,
+  migrations, Cron route, queue-wide runner, or portfolio repository.
+
+The authenticated Payload login returned `200` inside the private harness; its
+JWT was retained only in memory and discarded before process exit.
+
+### Observed lifecycle
+
+Each mutation used the normal authenticated CMS REST API. Each public check
+used the deployed anonymous CMS REST route or the public portfolio HTTP route.
+The harness polled for at most 75 seconds per state; the complete lifecycle
+and cleanup finished in roughly 29 seconds.
+
+| Transition | CMS public result | Portfolio result | Durable-job observation |
+| --- | --- | --- | --- |
+| Create draft | direct detail `404` | detail `404` | queue remained empty; no public event was emitted. |
+| Publish | detail `200` | listing, detail, and Category A page `200`, each containing the fixture title | queue empty after the response-driven work. |
+| Published title/content update | detail `200` | listing, detail, and Category A page reflected the updated title | queue empty after the response-driven work. |
+| Move slug and category | new detail `200` | new detail and Category B contained the fixture; old detail `404`; Category A no longer contained it | queue empty after the response-driven work. |
+| Unpublish | detail `404` | detail `404`; listing and Category B excluded the title | queue empty after the response-driven work. |
+| Republish | detail `200` | listing, detail, and Category B again contained the title | queue empty after the response-driven work. |
+| Exact delete / cleanup | detail `404` | final current detail `404` | queue empty after the response-driven delete work. |
+
+The `blog-revalidation` task only returns a successful job result after the
+portfolio receiver returns HTTP `204`. Every public-content transition above
+reached its new portfolio state inside the bounded window and left no retained
+or errored queue row. This is strong task-contract-backed evidence of signed
+`204` delivery for the normal response path; the harness intentionally did not
+log signed request material or raw response objects.
+
+A filtered Vercel runtime-log query did not independently return the expected
+success log message. A broader one-hour query was rejected by Hobby-plan log
+retention. This is an observability limitation, not a failure of the lifecycle
+assertions; it should be addressed with production log/queue monitoring before
+relying on logs for incident response.
+
+### Cleanup and final state
+
+The exact Post deletion was completed before the two exact Category deletions.
+The private manifest was removed only after the final direct-Neon read-only
+check confirmed the original baseline:
+
+| Resource | Final count |
+| --- | ---: |
+| Users | 1 |
+| Posts / Categories / Tags / Media | 0 / 0 / 0 / 0 |
+| `blog-revalidation` jobs | 0 |
+
+The former current public fixture route returned `404`; the earlier old-slug
+route had already returned `404` after the move and was never recreated. No
+manifest, token, temporary fixture, job, or R2 object remains.
+
+### Phase 8H7 verdict
+
+**PASS — controlled Production editorial publication lifecycle and exact
+cleanup.** Draft isolation, publish, public update, slug/category move,
+unpublish, republish, delete, published-only CMS REST behavior, and public
+portfolio state were observed against the deployed applications. The
+authenticated scheduled Cron route remains **NOT LIVE-TESTED** by design: no
+Cron request, replay, or queue-wide processing was authorized or used.
+
 ## Risks and boundaries
 
 - Secret equality cannot be verified by presence-only checks. A successful signed delivery is the necessary end-to-end proof.
