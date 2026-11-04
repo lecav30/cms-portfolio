@@ -714,12 +714,69 @@ print them or read repository `.env` files. It will not include
 After the runtime source is complete, repeat the direct-Neon read-only
 preflight once more immediately before the single authorized exact-ID command.
 
+## Prompt 34 follow-up — authorized exact-ID recovery (2026-11-03)
+
+### Authorization and immediately preceding recheck
+
+The operator explicitly authorized recovery of only Production
+`blog-revalidation` jobs `1` and `2`, with no Cron endpoint, migrations,
+editorial writes, or unrelated jobs. Before execution, the restricted external
+runtime source was checked for the required `CMS_PRODUCTION_*` names only; no
+value was printed or copied into this repository. A fresh direct-Neon,
+read-only query then reconfirmed all of the following:
+
+- target: direct Neon Production database `neondb`, PostgreSQL `18.6`;
+- the same three reviewed migration records listed in the H6 section;
+- one User and zero Posts, Categories, Tags, and Media records; and
+- exactly two `blog-revalidation` rows: `1` (`publish`) and `2` (`delete`),
+  both idle, errored, incomplete, at four attempts, and using the expected
+  queue/task. No other queue row was present.
+
+This removed the earlier runtime-configuration gate; the prior gate text is
+retained above as historical context only.
+
+### Scoped execution and observed result
+
+The recovery ran once with the existing exact-ID command shape:
+
+```bash
+bun run revalidate:recover -- --id 1 --id 2 --execute --confirm-ids 1,2 --allow-production
+```
+
+It was started only through a temporary wrapper which supplied the private
+runtime values to the child process, forced `NODE_ENV=production`, disabled
+`INITIAL_ADMIN_*`, and performed a final pre-run queue identity check. The
+command acquired the shared PostgreSQL advisory lock, revalidated each ID, and
+used one `where.id.equals` / `limit: 1` Payload job run per selected ID. It did
+not call Cron or a queue-wide replay.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Job `1` | PASS | Runner reported `success`; terminal state `deleted-on-success`. |
+| Job `2` | PASS | Runner reported `success`; terminal state `deleted-on-success`. |
+| Signed receiver response | PASS — HTTP `204` | The task returns `success` only when the portfolio receiver response is exactly `204`; raw signed request details were intentionally not logged. |
+| Queue isolation | PASS | Post-run query found no remaining `blog-revalidation` rows. The pre-run inventory contained only IDs `1` and `2`. |
+| Deleted fixture public route | PASS | Bounded public request returned HTTP `404`. The fixture slug was kept private. |
+| Unrelated production resources | PASS | No Cron invocation, migration, deployment, administrator/content/media/R2 write, or environment change was performed. |
+
+Payload deletes successfully completed jobs under the configured policy, so
+`deleted-on-success` is the expected terminal condition, not a missing audit
+record. No automatic retry was made.
+
+### Resulting status
+
+**Gate H3 complete.** The two historic fixture-only failures were recovered
+through the exact-ID mechanism after the signed receiver was repaired. A new
+full production editorial lifecycle remains a separate, explicitly authorized
+test; it was not recreated here because the Phase 8H fixtures had already been
+removed.
+
 ## Risks and boundaries
 
 - Secret equality cannot be verified by presence-only checks. A successful signed delivery is the necessary end-to-end proof.
 - Portfolio routes inherit a dynamic root layout and use tagged/stale-while-revalidate fetching. A first request after a valid invalidation is not proof of instant freshness; a follow-up bounded observation is required.
 - The historical oversized-upload failure was not reproduced. This validation used one small allowed PNG only.
-- No migrations, deployments, R2/provider configuration changes, administrator changes, signed manual webhook requests, Cron calls, or replay commands were made.
+- No migrations, deployments, R2/provider configuration changes, administrator changes, signed manual webhook requests, or Cron calls were made. The only Production write in this follow-up was the explicitly authorized exact-ID recovery of jobs `1` and `2` documented above.
 
 ## Git
 
