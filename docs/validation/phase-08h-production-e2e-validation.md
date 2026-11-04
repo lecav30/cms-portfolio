@@ -771,6 +771,82 @@ full production editorial lifecycle remains a separate, explicitly authorized
 test; it was not recreated here because the Phase 8H fixtures had already been
 removed.
 
+## Prompt 35 — Phase 8H7 final editorial lifecycle preflight (2026-11-03)
+
+### Read-only deployment and configuration evidence
+
+This preflight made no Production writes. It used the external `0600` runtime
+source only for a direct Neon `BEGIN READ ONLY` transaction; the source was not
+printed, copied into the repository, or evaluated by a shell. The temporary
+reader required the explicit `CMS_PRODUCTION_DATABASE_URL` name and rejected
+local or Neon pooler endpoints, preventing a local-development fallback.
+
+| Component | Result | Evidence |
+| --- | --- | --- |
+| CMS Vercel project | PASS | `cms-portfolio` under `own-projects` (`sebastianlevano` scope); Next.js, Node `24.x`, root `.`, region `iad1`. |
+| CMS active Production deployment | PASS | Ready; production `main` commit `6d5765d5837283753def1c878cde58e9e249f7de`. Local documentation commits after that SHA are not deployed and do not change CMS runtime behavior. |
+| Portfolio Vercel project | PASS | `portfolio` under the same scope; Next.js and Node `24.x`. |
+| Portfolio active Production deployment | PASS | Ready; production `main` commit `92b9c5987798b1ad4bc96cdd2ebc5ee346cb7b6f`. The portfolio repository was not modified. |
+| CMS Production variable names/scopes | PASS, names only | `DATABASE_URL`, `PAYLOAD_SECRET`, `BLOG_REVALIDATION_SECRET`, `CRON_SECRET`, `PORTFOLIO_REVALIDATION_URL`, `NEXT_PUBLIC_SERVER_URL`, `CORS_ORIGINS`, and all required `R2_*` names are Production-scoped. |
+| Portfolio Production variable names/scopes | PASS, names only | `PAYLOAD_CMS_URL` and `BLOG_REVALIDATION_SECRET` are Production-scoped. Values and equality were not read. |
+
+### Neon baseline and queue state
+
+| Check | Result |
+| --- | --- |
+| Target identity | PASS — direct Neon Production endpoint, database `neondb`, PostgreSQL `18.6`. |
+| Migration chain | PASS — `20261029_025459_phase_02_editorial_collections`, `20261029_032843_phase_03_r2_media_prefix`, and `20261029_202955_phase_05_blog_revalidation_jobs`. |
+| User count | PASS — one, queried as a count only. |
+| Posts / published Posts / Categories / Tags / Media | PASS — all zero. |
+| `blog-revalidation` queue | PASS — empty. |
+
+### Public boundary checks
+
+| Request | Observed status | Result |
+| --- | ---: | --- |
+| CMS `HEAD /admin` | `200` | PASS — reachability only. |
+| CMS public `GET /api/posts?limit=1` | `200` | PASS — published-read endpoint reachable. |
+| CMS anonymous `GET /api/users` | `403` | PASS — user records remain protected. |
+| CMS anonymous `POST /api/posts` with an empty JSON body | `403` | PASS — rejected; no record was created. |
+| Portfolio `GET /blog` | `200` | PASS — public listing reachable. |
+
+### Gate H7 write plan and boundaries
+
+The next stage needs new, bounded Production data; it is **not authorized by
+this preflight**. If approved, it will create and remove only these
+uniquely-prefixed text-only fixtures:
+
+1. two Categories (the second is needed solely to verify a category move);
+2. one optional Tag only if the real authoring request requires it (otherwise
+   no Tag); and
+3. one Post, created as a draft and then transitioned through publish, public
+   edit, slug/category move, unpublish, republish, and delete.
+
+No Media or R2 object will be created. Each post-response transition will be
+observed through the normal Payload `after()` scheduler and its durable
+`blog-revalidation` job only. The test will not invoke Cron, queue-wide replay,
+or an exact-ID recovery command. If the normal response path leaves any job
+pending or errored, new writes will stop, the exact job IDs/statuses will be
+reported, and a separate authorization will be requested before any manual
+runner action.
+
+For each transition, bounded public CMS REST and portfolio HTTP checks will
+assert the current/previous detail path, category listing, draft isolation,
+and visible title state. The portfolio's tagged stale-while-revalidate behavior
+will be allowed a finite polling window; an initial stale response will not be
+treated as either success or failure. Cleanup will use the exact saved fixture
+IDs only, then recheck the baseline counts, queue state, and all former public
+fixture URLs (`404`). No broad deletion, migration, deployment, environment
+edit, user operation, R2 write, Cron call, or portfolio change is in scope.
+
+**GATE H7-WRITE READY — AWAITING EXPLICIT AUTHORIZATION.**
+
+> I authorize Gate H7-WRITE to create, lifecycle-test, and remove only one
+> uniquely prefixed text-only Production Post and its two uniquely prefixed
+> Categories (plus one Tag only if required), using normal post-response job
+> handling; no Media/R2 writes, Cron, replay, migrations, deployments,
+> environment changes, or unrelated content/user operations.
+
 ## Risks and boundaries
 
 - Secret equality cannot be verified by presence-only checks. A successful signed delivery is the necessary end-to-end proof.
