@@ -605,6 +605,79 @@ It is valid only from the verified Production runtime context after the fresh
 preflight and explicit authorization. The command is not a substitute for the
 target check or the approval gate.
 
+## Prompt 34 — Phase 8H6 private Production Neon read-only preflight (2026-11-03)
+
+### Credential source and read-only boundary
+
+The operator provided an external private credential file at a restricted
+home-directory path. Its permissions were verified as `0600`; it was neither
+copied into this repository nor printed. The preflight parsed only the named
+`CMS_PRODUCTION_DATABASE_URL` assignment without shell evaluation and did not
+read the ordinary `DATABASE_URL` name, any `.env`/`.env.local` file, a Vercel
+environment export, or a Payload startup path. This prevents the local
+`cms_portfolio_dev` fallback observed in H5.
+
+One direct `pg` client transaction used `BEGIN READ ONLY`, a five-second local
+statement timeout, narrowly scoped `SELECT` statements, and `ROLLBACK`. No
+application mutation API, job runner, Cron route, migration, or webhook was
+called. The temporary credential-free reader script was removed after the
+query; the operator-owned credential file remains untouched.
+
+### Production target and schema evidence
+
+| Item | Result |
+| --- | --- |
+| Provider / endpoint | PASS — Neon direct endpoint (not a `-pooler` host) |
+| Database / engine | PASS — `neondb`, PostgreSQL `18.6` |
+| Migration records | PASS — `20261029_025459_phase_02_editorial_collections`, `20261029_032843_phase_03_r2_media_prefix`, and `20261029_202955_phase_05_blog_revalidation_jobs` |
+| User count | PASS — exactly one; no user identity or password data selected |
+| Posts / Categories / Tags / Media counts | PASS — all zero |
+
+### Revalidation queue inventory
+
+The complete `blog-revalidation` queue contains exactly two rows and no
+unrelated ready, failed, completed, or differently tasked entries:
+
+| Job | Task / queue | Operation | Error / processing / completed | Attempts | Fixture linkage |
+| ---: | --- | --- | --- | ---: | --- |
+| 1 | `blog-revalidation` / `blog-revalidation` | `publish` | errored / idle / not completed | 4 | current-location shape |
+| 2 | `blog-revalidation` / `blog-revalidation` | `delete` | errored / idle / not completed | 4 | previous-location shape |
+
+Both rows reference the same non-public Post identifier. No raw slugs, event
+IDs, task input, credentials, or signature material was recorded. This matches
+the cleaned Phase 8H fixture lifecycle and satisfies the exact recovery CLI's
+queue, task, failed-state, processing, and completion preconditions.
+
+### CLI safeguards and decision
+
+The checked-out H4 command remains at `d23d73f`; its execution parser was
+reconfirmed locally to reject `--execute` without the matching
+`--confirm-ids` before any Payload/database operation. Previous H4 integration
+validation covers its exact-ID predicate, advisory-lock contention, unrelated
+job isolation, signed local delivery, repeat refusal, and partial failure.
+
+**GATE H3 READY — AWAITING EXPLICIT AUTHORIZATION.** Production remains
+read-only in this phase. Do not run a queue-wide replay or Cron endpoint. In a
+subsequent, separately authorized turn, first repeat the same direct-Neon
+read-only identity/inventory check, then run only this command within the
+verified private Production runtime (where `DATABASE_URL` is supplied from the
+external private credential source, never a repository `.env` file):
+
+```bash
+bun run revalidate:recover -- --id 1 --id 2 --execute --confirm-ids 1,2 --allow-production
+```
+
+Required authorization wording:
+
+> I authorize exact-ID recovery of only production `blog-revalidation` jobs 1
+> and 2 after reconfirming their identifiers and state; no unrelated jobs,
+> Cron endpoint, migrations, or editorial writes.
+
+After authorization, record only sanitized per-ID result status, receiver HTTP
+status, terminal/deleted-on-success state, unchanged queue isolation, and the
+public absence of the already-deleted fixture. Do not retry automatically if a
+delivery is not `204`.
+
 ## Risks and boundaries
 
 - Secret equality cannot be verified by presence-only checks. A successful signed delivery is the necessary end-to-end proof.
