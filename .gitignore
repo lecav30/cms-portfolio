@@ -18,3 +18,5 @@ media/
 # Next.js development-only agent instruction files
 AGENTS.md
 CLAUDE.md
+.vercel
+.env*
